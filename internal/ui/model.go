@@ -51,6 +51,7 @@ type Model struct {
 
 	// Standings view state
 	standings        []api.DivisionStandings
+	wbcStandings     []api.WBCPool
 
 	// Game view state
 	currentGame        *api.Game
@@ -68,6 +69,8 @@ type Model struct {
 
 	// Track which game we expect data for, to discard stale responses
 	expectedGameID int
+	// If set, launch directly into this game on init
+	initialGameID int
 }
 
 // Message types for async operations
@@ -79,6 +82,11 @@ type scheduleLoadedMsg struct {
 type standingsLoadedMsg struct {
 	standings []api.DivisionStandings
 	err       error
+}
+
+type wbcStandingsLoadedMsg struct {
+	pools []api.WBCPool
+	err   error
 }
 
 type gameLoadedMsg struct {
@@ -102,8 +110,9 @@ type gameTickMsg struct {
 	timestamp string
 }
 
-// NewModel creates a new application model
-func NewModel(cfg *config.Config) Model {
+// NewModel creates a new application model.
+// If initialGameID > 0, the TUI launches directly into that game.
+func NewModel(cfg *config.Config, initialGameID int) Model {
 	// Detect terminal background for color adjustments
 	DetectDarkMode(lipgloss.HasDarkBackground())
 
@@ -121,7 +130,7 @@ func NewModel(cfg *config.Config) Model {
 	s := anim.NewSpinner(15, "Loading", colorPrimary, colorAccent)
 	s, _ = s.Start()
 
-	return Model{
+	m := Model{
 		view:         ScheduleView,
 		config:       cfg,
 		apiClient:    api.NewClient(),
@@ -131,6 +140,14 @@ func NewModel(cfg *config.Config) Model {
 		games:        []api.Game{},
 		standings:    []api.DivisionStandings{},
 	}
+
+	if initialGameID > 0 {
+		m.view = GameView
+		m.expectedGameID = initialGameID
+		m.initialGameID = initialGameID
+	}
+
+	return m
 }
 
 // startSpinner creates a new spinner and returns its first tick command.
@@ -147,7 +164,11 @@ func (m Model) Init() tea.Cmd {
 	if m.spinner != nil {
 		cmds = append(cmds, m.spinner.Tick())
 	}
-	cmds = append(cmds, loadSchedule(m.apiClient, m.scheduleDate))
+	if m.initialGameID > 0 {
+		cmds = append(cmds, loadGameIncremental(m.apiClient, m.initialGameID, nil, ""))
+	} else {
+		cmds = append(cmds, loadSchedule(m.apiClient, m.scheduleDate))
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -180,9 +201,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.gameRawJSON = nil
 				m.gameTimestamp = ""
 				m.scoreAnim = nil
+				m.wbcStandings = nil
 				m.loading = true
 				spinnerCmd := m.startSpinner("Loading", colorPrimary, colorAccent)
-				return m, tea.Batch(spinnerCmd, loadStandings(m.apiClient))
+				cmds := []tea.Cmd{spinnerCmd, loadStandings(m.apiClient)}
+				if hasWBCGames(m.games) {
+					cmds = append(cmds, loadWBCStandings(m.apiClient, m.scheduleDate))
+				}
+				return m, tea.Batch(cmds...)
 			}
 		}
 
@@ -221,8 +247,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = msg.err
 		if msg.err == nil {
-			sortGames(msg.games)
-			m.games = msg.games
+			wbc, mlb := partitionGames(msg.games)
+			sortGames(wbc)
+			sortGames(mlb)
+			m.games = append(wbc, mlb...)
 			if len(m.games) > 0 && m.selectedGameIdx >= len(m.games) {
 				m.selectedGameIdx = len(m.games) - 1
 			}
@@ -236,6 +264,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		if msg.err == nil {
 			m.standings = msg.standings
+		}
+
+	case wbcStandingsLoadedMsg:
+		if msg.err == nil {
+			m.wbcStandings = msg.pools
 		}
 
 	case gameLoadedMsg:
@@ -441,7 +474,7 @@ func (m Model) renderHelpBar() string {
 
 func loadSchedule(client *api.Client, date time.Time) tea.Cmd {
 	return func() tea.Msg {
-		games, err := client.FetchSchedule(date)
+		games, err := client.FetchSchedule(date, "1,51")
 		return scheduleLoadedMsg{games: games, err: err}
 	}
 }
@@ -493,4 +526,20 @@ func tick() tea.Cmd {
 	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+func hasWBCGames(games []api.Game) bool {
+	for _, g := range games {
+		if g.GameType == "F" {
+			return true
+		}
+	}
+	return false
+}
+
+func loadWBCStandings(client *api.Client, date time.Time) tea.Cmd {
+	return func() tea.Msg {
+		pools, err := client.FetchWBCPoolStandings(date.Year())
+		return wbcStandingsLoadedMsg{pools: pools, err: err}
+	}
 }

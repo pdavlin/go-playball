@@ -12,6 +12,7 @@ type Game struct {
 	LiveData    *LiveData     `json:"liveData,omitempty"`
 	GameData    *GameData     `json:"gameData,omitempty"`
 	MetaData    *MetaData     `json:"metaData,omitempty"`
+	GameType    string        `json:"gameType,omitempty"`
 }
 
 // GameStatus represents the current state of a game
@@ -234,10 +235,23 @@ type Inning struct {
 
 // InningScore contains runs/hits/errors for half inning
 type InningScore struct {
-	Runs       int `json:"runs,omitempty"`
-	Hits       int `json:"hits,omitempty"`
-	Errors     int `json:"errors,omitempty"`
-	LeftOnBase int `json:"leftOnBase,omitempty"`
+	Runs       *int `json:"runs,omitempty"`
+	Hits       int  `json:"hits,omitempty"`
+	Errors     int  `json:"errors,omitempty"`
+	LeftOnBase int  `json:"leftOnBase,omitempty"`
+}
+
+// RunsVal returns the runs value, defaulting to 0 if nil (unplayed).
+func (s InningScore) RunsVal() int {
+	if s.Runs == nil {
+		return 0
+	}
+	return *s.Runs
+}
+
+// WasPlayed returns true if this half-inning was actually played.
+func (s InningScore) WasPlayed() bool {
+	return s.Runs != nil
 }
 
 // LinescoreTeams contains team totals
@@ -557,4 +571,17 @@ type SplitRecord struct {
 	Wins         int          `json:"wins"`
 	Losses       int          `json:"losses"`
 	Pct          string       `json:"pct"`
+}
+
+// WBCPool represents a pool in the World Baseball Classic
+type WBCPool struct {
+	Name  string          // "Pool A", "Pool B", etc.
+	Teams []WBCTeamRecord
+}
+
+// WBCTeamRecord represents a team's record in WBC pool play
+type WBCTeamRecord struct {
+	Team   Team
+	Wins   int
+	Losses int
 }

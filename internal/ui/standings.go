@@ -27,19 +27,67 @@ func (m Model) handleStandingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) renderStandings() string {
 	var b strings.Builder
 
-	title := titleStyle.Render("MLB Standings")
-	b.WriteString(title)
-	b.WriteString("\n\n")
-
 	if m.err != nil {
 		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
 		return b.String()
 	}
 
-	if len(m.standings) == 0 {
+	if len(m.standings) == 0 && len(m.wbcStandings) == 0 {
 		b.WriteString(itemStyle.Render("Loading standings..."))
 		return b.String()
 	}
+
+	// Render WBC pool standings if present
+	if len(m.wbcStandings) > 0 {
+		wbcTitle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#000000", Dark: "#F8F8F2"}).
+			Background(lipgloss.AdaptiveColor{Light: "#E8E8E8", Dark: "#1A1A1A"}).
+			Padding(0, 2).
+			Width(m.width).
+			Align(lipgloss.Center).
+			Render("World Baseball Classic")
+		b.WriteString(wbcTitle)
+		b.WriteString("\n")
+
+		if m.width >= 120 {
+			panelWidth := (m.width - 2) / 2
+			// Render pools in pairs (2-column grid)
+			for i := 0; i < len(m.wbcStandings); i += 2 {
+				left := m.renderWBCPoolPanel(m.wbcStandings[i], panelWidth)
+				var right string
+				if i+1 < len(m.wbcStandings) {
+					right = m.renderWBCPoolPanel(m.wbcStandings[i+1], panelWidth)
+				}
+				row := lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+				b.WriteString(row)
+				b.WriteString("\n")
+			}
+		} else {
+			panelWidth := m.width
+			for _, pool := range m.wbcStandings {
+				b.WriteString(m.renderWBCPoolPanel(pool, panelWidth))
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Existing MLB standings rendering
+	if len(m.standings) == 0 {
+		return b.String()
+	}
+
+	mlbTitle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.AdaptiveColor{Light: "#000000", Dark: "#F8F8F2"}).
+		Background(lipgloss.AdaptiveColor{Light: "#E8E8E8", Dark: "#1A1A1A"}).
+		Padding(0, 2).
+		Width(m.width).
+		Align(lipgloss.Center).
+		Render("MLB Standings")
+	b.WriteString(mlbTitle)
+	b.WriteString("\n")
 
 	var alDivisions, nlDivisions []api.DivisionStandings
 	for _, div := range m.standings {
@@ -127,6 +175,14 @@ func (m Model) renderDivisionPanel(div api.DivisionStandings, panelWidth int) st
 
 	// Build table manually for per-row favorite highlighting
 	resolved := resolveWidths(headers, widths, rows, textWidth)
+	// Expand Team column to fill remaining panel width
+	fixedWidth := len(resolved) - 1
+	for i := 1; i < len(resolved); i++ {
+		fixedWidth += resolved[i]
+	}
+	if fill := textWidth - fixedWidth; fill > resolved[0] {
+		resolved[0] = fill
+	}
 	headerLine := formatRow(headers, resolved)
 
 	hdrStyle := lipgloss.NewStyle().
@@ -144,6 +200,61 @@ func (m Model) renderDivisionPanel(div api.DivisionStandings, panelWidth int) st
 		} else {
 			lines = append(lines, line)
 		}
+	}
+	tableContent := strings.Join(lines, "\n")
+
+	borderColor := lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"}
+	return renderStaticPanel(title, tableContent, panelWidth, borderColor)
+}
+
+// renderWBCPoolPanel renders a single WBC pool as a bordered panel
+func (m Model) renderWBCPoolPanel(pool api.WBCPool, panelWidth int) string {
+	title := pool.Name
+	textWidth := panelWidth - 4 // border (2) + padding (2)
+
+	headers := []string{"Team", "W", "L", "PCT"}
+	widths := []int{0, 3, 3, 5}
+
+	var rows [][]string
+	for _, team := range pool.Teams {
+		total := team.Wins + team.Losses
+		pct := ".000"
+		if total > 0 {
+			pct = fmt.Sprintf(".%03d", team.Wins*1000/total)
+		}
+		rows = append(rows, []string{
+			GetTeamShortName(team.Team.Name),
+			fmt.Sprintf("%d", team.Wins),
+			fmt.Sprintf("%d", team.Losses),
+			pct,
+		})
+	}
+
+	resolved := resolveWidths(headers, widths, rows, textWidth)
+	// Expand Team column to fill remaining panel width
+	fixedWidth := len(resolved) - 1 // spaces between columns
+	for i := 1; i < len(resolved); i++ {
+		fixedWidth += resolved[i]
+	}
+	if fill := textWidth - fixedWidth; fill > resolved[0] {
+		resolved[0] = fill
+	}
+	headerLine := formatRow(headers, resolved)
+
+	hdrStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.AdaptiveColor{Light: "#000000", Dark: "#000000"}).
+		Background(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#FFFFFF"})
+
+	var lines []string
+	lines = append(lines, hdrStyle.Render(headerLine))
+	for i, row := range rows {
+		line := formatRow(row, resolved)
+		// Colorize just the team name portion (first resolved[0] chars)
+		name := line[:resolved[0]]
+		rest := line[resolved[0]:]
+		colored := lipgloss.NewStyle().Foreground(GetTeamColors(pool.Teams[i].Team.Name).Primary).Render(name)
+		lines = append(lines, colored+rest)
 	}
 	tableContent := strings.Join(lines, "\n")
 

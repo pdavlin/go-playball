@@ -533,7 +533,7 @@ func (m Model) renderCompactGameSituation(game *api.Game) string {
 		awayInnings := ""
 		for i := 0; i < totalInnings; i++ {
 			if i < len(ls.Innings) {
-				awayInnings += fmt.Sprintf(" %2d", ls.Innings[i].Away.Runs)
+				awayInnings += fmt.Sprintf(" %2d", ls.Innings[i].Away.RunsVal())
 			} else {
 				awayInnings += "   "
 			}
@@ -554,7 +554,7 @@ func (m Model) renderCompactGameSituation(game *api.Game) string {
 		homeInnings := ""
 		for i := 0; i < totalInnings; i++ {
 			if i < len(ls.Innings) {
-				homeInnings += fmt.Sprintf(" %2d", ls.Innings[i].Home.Runs)
+				homeInnings += fmt.Sprintf(" %2d", ls.Innings[i].Home.RunsVal())
 			} else {
 				homeInnings += "   "
 			}
@@ -1201,15 +1201,21 @@ func (m Model) renderLineScore(game *api.Game) string {
 	awayColors := GetTeamColors(awayName)
 	homeColors := GetTeamColors(homeName)
 
+	// Determine total columns: at least 9, or more for extra innings
+	totalInnings := len(ls.Innings)
+	if totalInnings < 9 {
+		totalInnings = 9
+	}
+
+	isFinal := game.Status.AbstractGameState == "Final"
+	if !isFinal && game.GameData != nil {
+		isFinal = game.GameData.Status.AbstractGameState == "Final"
+	}
+
 	// Header
 	header := fmt.Sprintf("%-3s", "")
-	for i := 1; i <= len(ls.Innings) && i <= 9; i++ {
+	for i := 1; i <= totalInnings; i++ {
 		header += fmt.Sprintf("%3d", i)
-	}
-	if len(ls.Innings) > 9 {
-		for i := 10; i <= len(ls.Innings); i++ {
-			header += fmt.Sprintf("%3d", i)
-		}
 	}
 	header += fmt.Sprintf("   %3s %3s %3s", "R", "H", "E")
 
@@ -1222,8 +1228,14 @@ func (m Model) renderLineScore(game *api.Game) string {
 	// Away team row - gradient abbreviation + score data
 	awayAbbrStyled := anim.BlendGradientBold(fmt.Sprintf("%-3s", awayAbbr), awayColors.Primary, awayColors.Secondary)
 	awayScores := ""
-	for _, inning := range ls.Innings {
-		awayScores += fmt.Sprintf("%3d", inning.Away.Runs)
+	for i := 0; i < totalInnings; i++ {
+		if i < len(ls.Innings) && ls.Innings[i].Away.WasPlayed() {
+			awayScores += fmt.Sprintf("%3d", ls.Innings[i].Away.RunsVal())
+		} else if isFinal {
+			awayScores += "  X"
+		} else {
+			awayScores += "   "
+		}
 	}
 	awayScores += fmt.Sprintf("   %3d %3d %3d",
 		ls.Teams.Away.Runs,
@@ -1238,8 +1250,14 @@ func (m Model) renderLineScore(game *api.Game) string {
 	// Home team row - gradient abbreviation + score data
 	homeAbbrStyled := anim.BlendGradientBold(fmt.Sprintf("%-3s", homeAbbr), homeColors.Primary, homeColors.Secondary)
 	homeScores := ""
-	for _, inning := range ls.Innings {
-		homeScores += fmt.Sprintf("%3d", inning.Home.Runs)
+	for i := 0; i < totalInnings; i++ {
+		if i < len(ls.Innings) && ls.Innings[i].Home.WasPlayed() {
+			homeScores += fmt.Sprintf("%3d", ls.Innings[i].Home.RunsVal())
+		} else if isFinal {
+			homeScores += "  X"
+		} else {
+			homeScores += "   "
+		}
 	}
 	homeScores += fmt.Sprintf("   %3d %3d %3d",
 		ls.Teams.Home.Runs,
@@ -1300,6 +1318,28 @@ func getTeamAbbreviation(teamName string) string {
 		"Dodgers":      "LAD",
 		"Padres":       "SD",
 		"Giants":       "SF",
+
+		// WBC national teams
+		"Australia":                  "AUS",
+		"Brazil":                     "BRA",
+		"Canada":                     "CAN",
+		"Chinese Taipei":             "TPE",
+		"Colombia":                   "COL",
+		"Cuba":                       "CUB",
+		"Czechia":                    "CZE",
+		"Dominican Republic":         "DOM",
+		"Great Britain":              "GBR",
+		"Israel":                     "ISR",
+		"Italy":                      "ITA",
+		"Japan":                      "JPN",
+		"Korea":                      "KOR",
+		"Kingdom of the Netherlands": "NED",
+		"Mexico":                     "MEX",
+		"Nicaragua":                  "NCA",
+		"Panama":                     "PAN",
+		"Puerto Rico":                "PUR",
+		"United States":              "USA",
+		"Venezuela":                  "VEN",
 	}
 
 	// Try to find abbreviation
@@ -1752,13 +1792,13 @@ func buildScoreLineText(ls api.Linescore, totalInnings int, homeAway string) str
 	var innings string
 	for i := 0; i < totalInnings; i++ {
 		if i < len(ls.Innings) {
-			var runs int
+			var score api.InningScore
 			if homeAway == "away" {
-				runs = ls.Innings[i].Away.Runs
+				score = ls.Innings[i].Away
 			} else {
-				runs = ls.Innings[i].Home.Runs
+				score = ls.Innings[i].Home
 			}
-			innings += fmt.Sprintf(" %2d", runs)
+			innings += fmt.Sprintf(" %2d", score.RunsVal())
 		} else {
 			innings += "   "
 		}

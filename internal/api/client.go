@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
@@ -31,10 +32,11 @@ func NewClient() *Client {
 	}
 }
 
-// FetchSchedule retrieves the game schedule for a specific date
-func (c *Client) FetchSchedule(date time.Time) ([]Game, error) {
+// FetchSchedule retrieves the game schedule for a specific date.
+// sportIDs is a comma-separated string of sport IDs (e.g. "1" for MLB, "1,51" for MLB+WBC).
+func (c *Client) FetchSchedule(date time.Time, sportIDs string) ([]Game, error) {
 	dateStr := date.Format("01/02/2006")
-	url := fmt.Sprintf("%s/api/v1/schedule?sportId=1&hydrate=team,linescore&date=%s", baseURL, dateStr)
+	url := fmt.Sprintf("%s/api/v1/schedule?sportId=%s&hydrate=team,linescore&date=%s", baseURL, sportIDs, dateStr)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -276,4 +278,136 @@ func (c *Client) FetchStandings() ([]DivisionStandings, error) {
 	}
 
 	return standingsResp.Records, nil
+}
+
+// FetchWBCPoolStandings retrieves pool standings for the World Baseball Classic.
+// It fetches the WBC schedule (sportId=51, gameType=F) with team hydration,
+// groups teams by their division name (Pool A, Pool B, etc.), and returns
+// sorted pool standings. Teams within each pool are sorted by wins descending,
+// then losses ascending. Pools are sorted alphabetically by name.
+func (c *Client) FetchWBCPoolStandings(season int) ([]WBCPool, error) {
+	// Local structs to capture division info from the hydrated team response.
+	// The existing Team struct does not include a Division field, so we parse
+	// into these intermediate types and convert afterward.
+	type wbcDivision struct {
+		Name string `json:"name"`
+	}
+	type wbcTeam struct {
+		ID           int         `json:"id"`
+		Name         string      `json:"name"`
+		Abbreviation string      `json:"abbreviation"`
+		Division     wbcDivision `json:"division"`
+	}
+	type wbcScheduleTeam struct {
+		Team         wbcTeam      `json:"team"`
+		LeagueRecord LeagueRecord `json:"leagueRecord"`
+	}
+	type wbcGame struct {
+		Teams struct {
+			Away wbcScheduleTeam `json:"away"`
+			Home wbcScheduleTeam `json:"home"`
+		} `json:"teams"`
+	}
+	type wbcDate struct {
+		Games []wbcGame `json:"games"`
+	}
+	type wbcScheduleResponse struct {
+		Dates []wbcDate `json:"dates"`
+	}
+
+	url := fmt.Sprintf("%s/api/v1/schedule?sportId=51&season=%d&gameType=F&hydrate=team",
+		baseURL, season)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating WBC schedule request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching WBC schedule: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var schedResp wbcScheduleResponse
+	if err := json.NewDecoder(resp.Body).Decode(&schedResp); err != nil {
+		return nil, fmt.Errorf("decoding WBC schedule response: %w", err)
+	}
+
+	// teamKey uniquely identifies a team within a pool for deduplication.
+	type teamKey struct {
+		poolName string
+		teamID   int
+	}
+
+	// Track the best record (most games played) for each team in each pool.
+	type teamEntry struct {
+		team     wbcTeam
+		poolName string
+		wins     int
+		losses   int
+	}
+
+	best := make(map[teamKey]*teamEntry)
+
+	for _, date := range schedResp.Dates {
+		for _, game := range date.Games {
+			sides := []wbcScheduleTeam{game.Teams.Away, game.Teams.Home}
+			for _, side := range sides {
+				pool := side.Team.Division.Name
+				if pool == "" {
+					continue
+				}
+				key := teamKey{poolName: pool, teamID: side.Team.ID}
+				gamesPlayed := side.LeagueRecord.Wins + side.LeagueRecord.Losses
+
+				existing, found := best[key]
+				if !found || gamesPlayed > (existing.wins+existing.losses) {
+					best[key] = &teamEntry{
+						team:     side.Team,
+						poolName: pool,
+						wins:     side.LeagueRecord.Wins,
+						losses:   side.LeagueRecord.Losses,
+					}
+				}
+			}
+		}
+	}
+
+	// Group entries by pool name.
+	poolMap := make(map[string][]WBCTeamRecord)
+	for _, entry := range best {
+		record := WBCTeamRecord{
+			Team: Team{
+				ID:           entry.team.ID,
+				Name:         entry.team.Name,
+				Abbreviation: entry.team.Abbreviation,
+			},
+			Wins:   entry.wins,
+			Losses: entry.losses,
+		}
+		poolMap[entry.poolName] = append(poolMap[entry.poolName], record)
+	}
+
+	// Build sorted result.
+	pools := make([]WBCPool, 0, len(poolMap))
+	for name, teams := range poolMap {
+		sort.Slice(teams, func(i, j int) bool {
+			if teams[i].Wins != teams[j].Wins {
+				return teams[i].Wins > teams[j].Wins
+			}
+			return teams[i].Losses < teams[j].Losses
+		})
+		pools = append(pools, WBCPool{Name: name, Teams: teams})
+	}
+	sort.Slice(pools, func(i, j int) bool {
+		return pools[i].Name < pools[j].Name
+	})
+
+	return pools, nil
 }

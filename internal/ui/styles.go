@@ -16,7 +16,7 @@ var (
 	colorBright    = lipgloss.Color("#F8F8F2")
 
 	// Event colors (used in game.go renderAllPlays)
-	colorInningHeader = lipgloss.Color("0")
+	colorInningHeader = lipgloss.Color("7")
 	colorStrikeout    = lipgloss.Color("1")
 	colorWalk         = lipgloss.Color("2")
 	colorInPlayNoOut  = lipgloss.Color("4")

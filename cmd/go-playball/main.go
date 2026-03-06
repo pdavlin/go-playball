@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pdavlin/go-playball/internal/api"
 	"github.com/pdavlin/go-playball/internal/config"
 	"github.com/pdavlin/go-playball/internal/ui"
 )
@@ -24,6 +27,26 @@ func main() {
 		case "config":
 			handleConfigCommand(cfg)
 			return
+		case "live":
+			handleLiveCommand()
+			return
+		case "game":
+			if len(os.Args) < 3 {
+				fmt.Fprintln(os.Stderr, "Usage: go-playball game <game_id>")
+				os.Exit(1)
+			}
+			gameID, err := strconv.Atoi(os.Args[2])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid game ID: %s\n", os.Args[2])
+				os.Exit(1)
+			}
+			model := ui.NewModel(cfg, gameID)
+			p := tea.NewProgram(model, tea.WithAltScreen())
+			if _, err := p.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "help", "-h", "--help":
 			printHelp()
 			return
@@ -34,11 +57,39 @@ func main() {
 	}
 
 	// Create and start the TUI application
-	model := ui.NewModel(cfg)
+	model := ui.NewModel(cfg, 0)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func handleLiveCommand() {
+	client := api.NewClient()
+	games, err := client.FetchSchedule(time.Now(), "1,51")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching schedule: %v\n", err)
+		os.Exit(1)
+	}
+
+	found := false
+	for _, game := range games {
+		if game.Status.AbstractGameState == "Live" {
+			away := game.Teams.Away.Team.Name
+			home := game.Teams.Home.Team.Name
+			inning := ""
+			if ls := game.Linescore; ls != nil {
+				inning = fmt.Sprintf(" (%s %s)", ls.InningState, ls.CurrentInningOrdinal)
+			}
+			fmt.Printf("%d\t%s @ %s%s\n", game.ID, away, home, inning)
+			found = true
+		}
+	}
+
+	if !found {
+		fmt.Println("No live games right now.")
 		os.Exit(1)
 	}
 }
@@ -124,6 +175,8 @@ go-playball - A terminal-based MLB game viewer
 
 USAGE:
     go-playball                            Start the application
+    go-playball live                       List live games (tab-separated: ID, matchup)
+    go-playball game <game_id>             Launch directly into a specific game
     go-playball config                     Show current configuration
     go-playball config <key>               Get a configuration value
     go-playball config <key> <value>       Set a configuration value

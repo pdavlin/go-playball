@@ -57,6 +57,28 @@ var teamColorMap = map[string]TeamColors{
 	"Dodgers":      {Primary: lipgloss.Color("#005A9C"), Secondary: lipgloss.Color("#EF3E42")},
 	"Padres":       {Primary: lipgloss.Color("#2F241D"), Secondary: lipgloss.Color("#FFC425")},
 	"Giants":       {Primary: lipgloss.Color("#FD5A1E"), Secondary: lipgloss.Color("#27251F")},
+
+	// WBC national teams
+	"Australia":              {Primary: lipgloss.Color("#00843D"), Secondary: lipgloss.Color("#FFCD00")},
+	"Brazil":                 {Primary: lipgloss.Color("#009C3B"), Secondary: lipgloss.Color("#FFDF00")},
+	"Canada":                 {Primary: lipgloss.Color("#FF0000"), Secondary: lipgloss.Color("#FFFFFF")},
+	"Chinese Taipei":         {Primary: lipgloss.Color("#0036B5"), Secondary: lipgloss.Color("#E80000")},
+	"Colombia":               {Primary: lipgloss.Color("#FCD116"), Secondary: lipgloss.Color("#003893")},
+	"Cuba":                   {Primary: lipgloss.Color("#002590"), Secondary: lipgloss.Color("#CC0D0D")},
+	"Czechia":                {Primary: lipgloss.Color("#11457E"), Secondary: lipgloss.Color("#D7141A")},
+	"Dominican Republic":     {Primary: lipgloss.Color("#002D62"), Secondary: lipgloss.Color("#CE1126")},
+	"Great Britain":          {Primary: lipgloss.Color("#012169"), Secondary: lipgloss.Color("#C8102E")},
+	"Israel":                 {Primary: lipgloss.Color("#0038B8"), Secondary: lipgloss.Color("#FFFFFF")},
+	"Italy":                  {Primary: lipgloss.Color("#009246"), Secondary: lipgloss.Color("#CE2B37")},
+	"Japan":                  {Primary: lipgloss.Color("#BC002D"), Secondary: lipgloss.Color("#FFFFFF")},
+	"Korea":                  {Primary: lipgloss.Color("#003478"), Secondary: lipgloss.Color("#CD2E3A")},
+	"Kingdom of the Netherlands": {Primary: lipgloss.Color("#FF6F00"), Secondary: lipgloss.Color("#21468B")},
+	"Mexico":                 {Primary: lipgloss.Color("#006847"), Secondary: lipgloss.Color("#CE1126")},
+	"Nicaragua":              {Primary: lipgloss.Color("#0067C6"), Secondary: lipgloss.Color("#FFFFFF")},
+	"Panama":                 {Primary: lipgloss.Color("#005BA6"), Secondary: lipgloss.Color("#D21034")},
+	"Puerto Rico":            {Primary: lipgloss.Color("#003DA5"), Secondary: lipgloss.Color("#E81B23")},
+	"United States":          {Primary: lipgloss.Color("#002868"), Secondary: lipgloss.Color("#BF0A30")},
+	"Venezuela":              {Primary: lipgloss.Color("#FFCC00"), Secondary: lipgloss.Color("#003DA5")},
 }
 
 // GetTeamColors returns the colors for a team, falling back to default colors.

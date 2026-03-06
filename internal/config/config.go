@@ -51,7 +51,7 @@ func DefaultConfig() *Config {
 			Success:   "#50FA7B",
 		},
 		EventColors: EventColorConfig{
-			InningHeader: "0",
+			InningHeader: "7",
 			Strikeout:    "1",
 			Walk:         "2",
 			InPlayNoOut:  "4",

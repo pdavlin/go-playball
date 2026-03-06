@@ -60,6 +60,19 @@ func sortGames(games []api.Game) {
 	})
 }
 
+// partitionGames splits games into WBC and MLB groups.
+// Within each group, existing sort order is preserved.
+func partitionGames(games []api.Game) (wbc, mlb []api.Game) {
+	for _, g := range games {
+		if g.GameType == "F" {
+			wbc = append(wbc, g)
+		} else {
+			mlb = append(mlb, g)
+		}
+	}
+	return wbc, mlb
+}
+
 // scheduleGridCols returns the number of columns for the schedule grid
 func scheduleGridCols(width int) int {
 	numCols := width / minCardWidth
@@ -175,7 +188,12 @@ func (m Model) renderSchedule() string {
 	var b strings.Builder
 
 	dateStr := m.scheduleDate.Format("Monday, January 2, 2006")
-	titleText := fmt.Sprintf("MLB Schedule - %s", dateStr)
+	wbcGames, _ := partitionGames(m.games)
+	scheduleLabel := "MLB"
+	if len(wbcGames) > 0 {
+		scheduleLabel = "Baseball"
+	}
+	titleText := fmt.Sprintf("%s Schedule - %s", scheduleLabel, dateStr)
 
 	titlePanel := lipgloss.NewStyle().
 		Bold(true).
@@ -226,14 +244,42 @@ func (m Model) renderSchedule() string {
 		endRow = totalRows
 	}
 
+	// Determine WBC/MLB boundary for section headers
+	wbcCount := 0
+	for _, g := range m.games {
+		if g.GameType == "F" {
+			wbcCount++
+		}
+	}
+	hasBothSections := wbcCount > 0 && wbcCount < len(m.games)
+	mlbFirstRow := -1
+	if hasBothSections {
+		mlbFirstRow = (wbcCount + numCols - 1) / numCols
+	}
+
+	sectionHeaderStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#CCCCCC"}).
+		Background(lipgloss.AdaptiveColor{Light: "#D8D8D8", Dark: "#2A2A2A"}).
+		Padding(0, 1).
+		Width(m.width)
+
 	// Render visible rows
 	var rows []string
 	for row := startRow; row < endRow; row++ {
+		// Insert WBC header before the first visible row when scrolled to top
+		if hasBothSections && row == startRow && startRow == 0 {
+			rows = append(rows, sectionHeaderStyle.Render("World Baseball Classic"))
+		}
+		// Insert MLB header before the first MLB row
+		if hasBothSections && row == mlbFirstRow && row >= startRow {
+			rows = append(rows, sectionHeaderStyle.Render("MLB"))
+		}
+
 		var cards []string
 		for col := 0; col < numCols; col++ {
 			idx := row*numCols + col
 			if idx >= len(m.games) {
-				// Empty cell to fill the row
 				cards = append(cards, lipgloss.NewStyle().Width(cardWidth).Render(""))
 				continue
 			}
