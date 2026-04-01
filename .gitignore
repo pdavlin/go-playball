@@ -35,3 +35,6 @@ build/
 
 # Debug logs
 /tmp/playball-debug.log
+
+# misc
+docs/
