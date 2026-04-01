@@ -106,7 +106,6 @@ func Load() (*Config, error) {
 func (c *Config) fillDefaults() {
 	defaults := DefaultConfig()
 
-
 	if c.ScheduleRefreshSeconds == 0 {
 		c.ScheduleRefreshSeconds = defaults.ScheduleRefreshSeconds
 	}
