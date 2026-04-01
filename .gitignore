@@ -19,6 +19,7 @@ go.work
 
 # Build output
 playball
+go-playball
 dist/
 build/
 
@@ -34,3 +35,6 @@ build/
 
 # Debug logs
 /tmp/playball-debug.log
+
+# misc
+docs/

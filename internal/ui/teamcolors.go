@@ -110,6 +110,9 @@ func GetTeamColors(teamName string) TeamColors {
 	if darkMode {
 		colors.Primary = ensureMinLuminance(colors.Primary, 0.15)
 		colors.Secondary = ensureMinLuminance(colors.Secondary, 0.12)
+	} else {
+		colors.Primary = ensureMaxLuminance(colors.Primary, 0.25)
+		colors.Secondary = ensureMaxLuminance(colors.Secondary, 0.25)
 	}
 
 	return colors
@@ -157,6 +160,42 @@ func ensureMinLuminance(c lipgloss.Color, minLum float64) lipgloss.Color {
 	nr := blend(r, 255, factor)
 	ng := blend(g, 255, factor)
 	nb := blend(b, 255, factor)
+
+	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", nr, ng, nb))
+}
+
+// ensureMaxLuminance darkens a hex color if its relative luminance
+// exceeds the given threshold. Used for light terminal backgrounds.
+func ensureMaxLuminance(c lipgloss.Color, maxLum float64) lipgloss.Color {
+	hex := string(c)
+	r, g, b, ok := parseHex(hex)
+	if !ok {
+		return c
+	}
+
+	lum := relativeLuminance(r, g, b)
+	if lum <= maxLum {
+		return c
+	}
+
+	// Blend toward black until we reach the target luminance.
+	lo, hi := 0.0, 1.0
+	for i := 0; i < 16; i++ {
+		mid := (lo + hi) / 2
+		mr := blend(r, 0, mid)
+		mg := blend(g, 0, mid)
+		mb := blend(b, 0, mid)
+		if relativeLuminance(mr, mg, mb) > maxLum {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+
+	factor := hi
+	nr := blend(r, 0, factor)
+	ng := blend(g, 0, factor)
+	nb := blend(b, 0, factor)
 
 	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", nr, ng, nb))
 }

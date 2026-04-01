@@ -264,6 +264,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		cmds = append(cmds, scheduleTick(m.config.ScheduleRefreshSeconds))
 
 	case standingsLoadedMsg:
 		m.loading = false
@@ -384,8 +385,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == ScheduleView {
 			cmds = append(cmds, loadSchedule(m.apiClient, m.scheduleDate))
 		}
-		// Schedule next tick
-		cmds = append(cmds, tick())
 	}
 
 	return m, tea.Batch(cmds...)
@@ -531,8 +530,11 @@ func scheduleGameUpdateIncremental(gameID int, rawJSON []byte, timestamp string,
 	})
 }
 
-func tick() tea.Cmd {
-	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
+func scheduleTick(seconds int) tea.Cmd {
+	if seconds < 5 {
+		seconds = 5
+	}
+	return tea.Tick(time.Duration(seconds)*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }

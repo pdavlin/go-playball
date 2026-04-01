@@ -1,0 +1,267 @@
+name: Release Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          BINARY_NAME="go-playball"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BINARY_NAME="go-playball.exe"
+          fi
+          go build -ldflags "-s -w \
+            -X github.com/pdavlin/go-playball/internal/buildinfo.version=${VERSION} \
+            -X github.com/pdavlin/go-playball/internal/buildinfo.commit=${GITHUB_SHA::7} \
+            -X github.com/pdavlin/go-playball/internal/buildinfo.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o "dist/${BINARY_NAME}" \
+            ./cmd/go-playball/
+
+      - name: Package archive
+        run: |
+          ARCHIVE_NAME="go-playball_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            cd dist && zip "../${ARCHIVE_NAME}.zip" go-playball.exe
+          else
+            tar -czf "${ARCHIVE_NAME}.tar.gz" -C dist go-playball
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-playball_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: go-playball_*.*
+          retention-days: 1
+
+  smoke-test:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build native binary
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          go build -ldflags "\
+            -X github.com/pdavlin/go-playball/internal/buildinfo.version=${VERSION} \
+            -X github.com/pdavlin/go-playball/internal/buildinfo.commit=${GITHUB_SHA::7} \
+            -X github.com/pdavlin/go-playball/internal/buildinfo.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o go-playball \
+            ./cmd/go-playball/
+
+      - name: Smoke test version output
+        run: |
+          OUTPUT=$(./go-playball version)
+          echo "Version output: ${OUTPUT}"
+          VERSION=${GITHUB_REF_NAME}
+          if echo "${OUTPUT}" | grep -q "${VERSION}"; then
+            echo "✅ Tag version found in version output"
+          else
+            echo "❌ Expected tag version '${VERSION}' in output"
+            exit 1
+          fi
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      sha_darwin_amd64: ${{ steps.checksums.outputs.sha_darwin_amd64 }}
+      sha_darwin_arm64: ${{ steps.checksums.outputs.sha_darwin_arm64 }}
+      sha_linux_amd64: ${{ steps.checksums.outputs.sha_linux_amd64 }}
+      sha_linux_arm64: ${{ steps.checksums.outputs.sha_linux_arm64 }}
+      sha_windows_amd64: ${{ steps.checksums.outputs.sha_windows_amd64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        id: checksums
+        run: |
+          cd artifacts
+          sha256sum go-playball_*.tar.gz go-playball_*.zip > SHA256SUMS
+          cat SHA256SUMS
+
+          # Export individual checksums for downstream jobs
+          echo "sha_darwin_amd64=$(grep 'darwin_amd64' SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "sha_darwin_arm64=$(grep 'darwin_arm64' SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_amd64=$(grep 'linux_amd64' SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_arm64=$(grep 'linux_arm64' SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "sha_windows_amd64=$(grep 'windows_amd64' SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            ## go-playball ${{ github.ref_name }}
+
+            ### Install
+
+            **Homebrew (macOS/Linux):**
+            ```
+            brew install pdavlin/go-playball/go-playball
+            ```
+
+            **Scoop (Windows):**
+            ```
+            scoop bucket add go-playball https://github.com/pdavlin/scoop-go-playball
+            scoop install go-playball
+            ```
+
+            **Direct download:** See assets below.
+
+            ---
+            _Add release notes above this line._
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            artifacts/go-playball_*.tar.gz
+            artifacts/go-playball_*.zip
+            artifacts/SHA256SUMS
+
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Homebrew formula
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          VERSION_NUM=${VERSION#v}  # Strip leading 'v'
+
+          SHA_DARWIN_AMD64="${{ needs.release.outputs.sha_darwin_amd64 }}"
+          SHA_DARWIN_ARM64="${{ needs.release.outputs.sha_darwin_arm64 }}"
+          SHA_LINUX_AMD64="${{ needs.release.outputs.sha_linux_amd64 }}"
+          SHA_LINUX_ARM64="${{ needs.release.outputs.sha_linux_arm64 }}"
+
+          git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/pdavlin/homebrew-go-playball.git"
+          cd homebrew-go-playball
+
+          cat > Formula/go-playball.rb << FORMULA
+          class GoPlayball < Formula
+            desc "Terminal-based MLB game viewer"
+            homepage "https://github.com/pdavlin/go-playball"
+            version "${VERSION_NUM}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/pdavlin/go-playball/releases/download/${VERSION}/go-playball_darwin_arm64.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
+              else
+                url "https://github.com/pdavlin/go-playball/releases/download/${VERSION}/go-playball_darwin_amd64.tar.gz"
+                sha256 "${SHA_DARWIN_AMD64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/pdavlin/go-playball/releases/download/${VERSION}/go-playball_linux_arm64.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              else
+                url "https://github.com/pdavlin/go-playball/releases/download/${VERSION}/go-playball_linux_amd64.tar.gz"
+                sha256 "${SHA_LINUX_AMD64}"
+              end
+            end
+
+            def install
+              bin.install "go-playball"
+            end
+
+            test do
+              assert_match "go-playball", shell_output("#{bin}/go-playball version")
+            end
+          end
+          FORMULA
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' Formula/go-playball.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/go-playball.rb
+          git commit -m "Update go-playball to ${VERSION}"
+          git push
+
+  update-scoop:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Scoop manifest
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          VERSION_NUM=${VERSION#v}
+
+          SHA_WINDOWS_AMD64="${{ needs.release.outputs.sha_windows_amd64 }}"
+
+          git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/pdavlin/scoop-go-playball.git"
+          cd scoop-go-playball
+
+          jq --arg ver "${VERSION_NUM}" \
+             --arg url "https://github.com/pdavlin/go-playball/releases/download/${VERSION}/go-playball_windows_amd64.zip" \
+             --arg hash "${SHA_WINDOWS_AMD64}" \
+             '.version = $ver | .architecture."64bit".url = $url | .architecture."64bit".hash = $hash' \
+             bucket/go-playball.json > bucket/go-playball.json.tmp && mv bucket/go-playball.json.tmp bucket/go-playball.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bucket/go-playball.json
+          git commit -m "Update go-playball to ${VERSION}"
+          git push

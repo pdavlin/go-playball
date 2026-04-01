@@ -9,11 +9,24 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pdavlin/go-playball/internal/api"
+	"github.com/pdavlin/go-playball/internal/buildinfo"
 	"github.com/pdavlin/go-playball/internal/config"
 	"github.com/pdavlin/go-playball/internal/ui"
 )
 
 func main() {
+	// Handle side-effect-free commands before loading config
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "-v", "--version":
+			fmt.Println(buildinfo.String())
+			return
+		case "help", "-h", "--help":
+			printHelp()
+			return
+		}
+	}
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -21,7 +34,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Handle CLI commands
+	// Handle config-dependent commands
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "config":
@@ -46,12 +59,6 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
-			return
-		case "help", "-h", "--help":
-			printHelp()
-			return
-		case "version", "-v", "--version":
-			fmt.Println("go-playball version 1.0.0")
 			return
 		}
 	}

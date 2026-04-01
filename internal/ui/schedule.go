@@ -95,6 +95,107 @@ func scheduleVisibleRows(height int) int {
 	return rows
 }
 
+// scheduleCardRow returns which card row (0-based) a flat game index falls in,
+// accounting for WBC and MLB being rendered as separate grids.
+func scheduleCardRow(games []api.Game, idx, numCols int) int {
+	wbcCount := 0
+	for _, g := range games {
+		if g.GameType == "F" {
+			wbcCount++
+		}
+	}
+	hasBothSections := wbcCount > 0 && wbcCount < len(games)
+	if !hasBothSections {
+		return idx / numCols
+	}
+	if idx < wbcCount {
+		return idx / numCols
+	}
+	wbcRows := (wbcCount + numCols - 1) / numCols
+	mlbLocalIdx := idx - wbcCount
+	return wbcRows + mlbLocalIdx/numCols
+}
+
+// scheduleNavDown returns the next selectedGameIdx when pressing down,
+// respecting section boundaries.
+func scheduleNavDown(games []api.Game, current, numCols int) int {
+	wbcCount := 0
+	for _, g := range games {
+		if g.GameType == "F" {
+			wbcCount++
+		}
+	}
+	hasBothSections := wbcCount > 0 && wbcCount < len(games)
+	if !hasBothSections {
+		next := current + numCols
+		if next < len(games) {
+			return next
+		}
+		return current
+	}
+	col := current % numCols
+	if current < wbcCount {
+		// In WBC section
+		next := current + numCols
+		if next < wbcCount {
+			return next
+		}
+		// Jump to MLB section, same column
+		mlbIdx := wbcCount + col
+		if mlbIdx >= len(games) {
+			mlbIdx = len(games) - 1
+		}
+		return mlbIdx
+	}
+	// In MLB section
+	mlbLocal := current - wbcCount
+	nextLocal := mlbLocal + numCols
+	if wbcCount+nextLocal < len(games) {
+		return wbcCount + nextLocal
+	}
+	return current
+}
+
+// scheduleNavUp returns the next selectedGameIdx when pressing up,
+// respecting section boundaries.
+func scheduleNavUp(games []api.Game, current, numCols int) int {
+	wbcCount := 0
+	for _, g := range games {
+		if g.GameType == "F" {
+			wbcCount++
+		}
+	}
+	hasBothSections := wbcCount > 0 && wbcCount < len(games)
+	if !hasBothSections {
+		next := current - numCols
+		if next >= 0 {
+			return next
+		}
+		return current
+	}
+	if current < wbcCount {
+		// In WBC section
+		next := current - numCols
+		if next >= 0 {
+			return next
+		}
+		return current
+	}
+	// In MLB section
+	mlbLocal := current - wbcCount
+	if mlbLocal >= numCols {
+		return current - numCols
+	}
+	// Jump to WBC section, same column
+	col := mlbLocal % numCols
+	wbcLastRow := (wbcCount - 1) / numCols
+	wbcIdx := wbcLastRow*numCols + col
+	if wbcIdx >= wbcCount {
+		wbcIdx = wbcCount - 1
+	}
+	return wbcIdx
+}
+
 // handleScheduleKeys handles keyboard input for schedule view
 func (m Model) handleScheduleKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	numCols := scheduleGridCols(m.width)
@@ -102,15 +203,9 @@ func (m Model) handleScheduleKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "up", "k":
-		next := m.selectedGameIdx - numCols
-		if next >= 0 {
-			m.selectedGameIdx = next
-		}
+		m.selectedGameIdx = scheduleNavUp(m.games, m.selectedGameIdx, numCols)
 	case "down", "j":
-		next := m.selectedGameIdx + numCols
-		if next < len(m.games) {
-			m.selectedGameIdx = next
-		}
+		m.selectedGameIdx = scheduleNavDown(m.games, m.selectedGameIdx, numCols)
 	case "left", "h":
 		if m.selectedGameIdx > 0 {
 			m.selectedGameIdx--
@@ -172,7 +267,7 @@ func (m Model) handleScheduleKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Adjust scroll offset to keep selected row visible
-	selectedRow := m.selectedGameIdx / numCols
+	selectedRow := scheduleCardRow(m.games, m.selectedGameIdx, numCols)
 	if selectedRow < m.scheduleScrollOffset {
 		m.scheduleScrollOffset = selectedRow
 	}
@@ -188,9 +283,9 @@ func (m Model) renderSchedule() string {
 	var b strings.Builder
 
 	dateStr := m.scheduleDate.Format("Monday, January 2, 2006")
-	wbcGames, _ := partitionGames(m.games)
+	wbcCheck, _ := partitionGames(m.games)
 	scheduleLabel := "MLB"
-	if len(wbcGames) > 0 {
+	if len(wbcCheck) > 0 {
 		scheduleLabel = "Baseball"
 	}
 	titleText := fmt.Sprintf("%s Schedule - %s", scheduleLabel, dateStr)
@@ -227,35 +322,8 @@ func (m Model) renderSchedule() string {
 	cardWidth := (m.width - numCols*2) / numCols
 	visibleRows := scheduleVisibleRows(m.height)
 
-	// Total rows
-	totalRows := (len(m.games) + numCols - 1) / numCols
-
-	// Clamp scroll offset
-	if m.scheduleScrollOffset > totalRows-visibleRows {
-		m.scheduleScrollOffset = totalRows - visibleRows
-	}
-	if m.scheduleScrollOffset < 0 {
-		m.scheduleScrollOffset = 0
-	}
-
-	startRow := m.scheduleScrollOffset
-	endRow := startRow + visibleRows
-	if endRow > totalRows {
-		endRow = totalRows
-	}
-
-	// Determine WBC/MLB boundary for section headers
-	wbcCount := 0
-	for _, g := range m.games {
-		if g.GameType == "F" {
-			wbcCount++
-		}
-	}
-	hasBothSections := wbcCount > 0 && wbcCount < len(m.games)
-	mlbFirstRow := -1
-	if hasBothSections {
-		mlbFirstRow = (wbcCount + numCols - 1) / numCols
-	}
+	wbcGames, mlbGames := partitionGames(m.games)
+	hasBothSections := len(wbcGames) > 0 && len(mlbGames) > 0
 
 	sectionHeaderStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -264,30 +332,99 @@ func (m Model) renderSchedule() string {
 		Padding(0, 1).
 		Width(m.width)
 
-	// Render visible rows
-	var rows []string
-	for row := startRow; row < endRow; row++ {
-		// Insert WBC header before the first visible row when scrolled to top
-		if hasBothSections && row == startRow && startRow == 0 {
-			rows = append(rows, sectionHeaderStyle.Render("World Baseball Classic"))
-		}
-		// Insert MLB header before the first MLB row
-		if hasBothSections && row == mlbFirstRow && row >= startRow {
-			rows = append(rows, sectionHeaderStyle.Render("MLB"))
-		}
+	// Build a list of renderable "lines" (section headers + card rows)
+	// each entry tracks its type so we can scroll through them uniformly
+	type rowEntry struct {
+		content string
+		isCards bool // true for card rows, false for section headers
+	}
+	var allEntries []rowEntry
 
-		var cards []string
-		for col := 0; col < numCols; col++ {
-			idx := row*numCols + col
-			if idx >= len(m.games) {
-				cards = append(cards, lipgloss.NewStyle().Width(cardWidth).Render(""))
-				continue
+	// Helper to add a section's card rows to allEntries
+	renderSection := func(games []api.Game, globalOffset int) {
+		sectionRows := (len(games) + numCols - 1) / numCols
+		for row := 0; row < sectionRows; row++ {
+			var cards []string
+			for col := 0; col < numCols; col++ {
+				localIdx := row*numCols + col
+				if localIdx >= len(games) {
+					cards = append(cards, lipgloss.NewStyle().Width(cardWidth).Render(""))
+					continue
+				}
+				globalIdx := globalOffset + localIdx
+				game := games[localIdx]
+				card := m.formatGameCard(game, globalIdx == m.selectedGameIdx, cardWidth)
+				cards = append(cards, card)
 			}
-			game := m.games[idx]
-			card := m.formatGameCard(game, idx == m.selectedGameIdx, cardWidth)
-			cards = append(cards, card)
+			allEntries = append(allEntries, rowEntry{
+				content: lipgloss.JoinHorizontal(lipgloss.Top, cards...),
+				isCards: true,
+			})
 		}
-		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, cards...))
+	}
+
+	if hasBothSections {
+		allEntries = append(allEntries, rowEntry{
+			content: sectionHeaderStyle.Render("World Baseball Classic"),
+		})
+		renderSection(wbcGames, 0)
+		allEntries = append(allEntries, rowEntry{
+			content: sectionHeaderStyle.Render("MLB"),
+		})
+		renderSection(mlbGames, len(wbcGames))
+	} else if len(wbcGames) > 0 {
+		allEntries = append(allEntries, rowEntry{
+			content: sectionHeaderStyle.Render("World Baseball Classic"),
+		})
+		renderSection(wbcGames, 0)
+	} else {
+		renderSection(mlbGames, 0)
+	}
+
+	// Count card rows for scroll calculations (headers don't count)
+	totalCardRows := 0
+	for _, e := range allEntries {
+		if e.isCards {
+			totalCardRows++
+		}
+	}
+
+	// Clamp scroll offset based on card rows
+	if m.scheduleScrollOffset > totalCardRows-visibleRows {
+		m.scheduleScrollOffset = totalCardRows - visibleRows
+	}
+	if m.scheduleScrollOffset < 0 {
+		m.scheduleScrollOffset = 0
+	}
+
+	// Select visible entries based on scroll offset (count only card rows).
+	// Section headers are shown only when they immediately precede a visible card row.
+	var rows []string
+	cardRowsSeen := 0
+	cardRowsRendered := 0
+	var pendingHeader *string
+	for _, e := range allEntries {
+		if cardRowsRendered >= visibleRows {
+			break
+		}
+		if !e.isCards {
+			// Buffer header; only emit it if the next card row is visible
+			h := e.content
+			pendingHeader = &h
+			continue
+		}
+		if cardRowsSeen < m.scheduleScrollOffset {
+			cardRowsSeen++
+			pendingHeader = nil
+			continue
+		}
+		if pendingHeader != nil {
+			rows = append(rows, *pendingHeader)
+			pendingHeader = nil
+		}
+		cardRowsSeen++
+		cardRowsRendered++
+		rows = append(rows, e.content)
 	}
 
 	gradFrom, gradTo := getScheduleGradientColors(m)
@@ -299,8 +436,8 @@ func (m Model) renderSchedule() string {
 
 	b.WriteString(lipgloss.JoinVertical(lipgloss.Left, rows...))
 
-	if endRow < totalRows {
-		downRemaining := (totalRows - endRow) * 5
+	if m.scheduleScrollOffset+cardRowsRendered < totalCardRows {
+		downRemaining := (totalCardRows - m.scheduleScrollOffset - cardRowsRendered) * 5
 		b.WriteString("\n")
 		b.WriteString(anim.ScrollIndicator(anim.ScrollDown, downRemaining, m.width, gradFrom, gradTo))
 	}
