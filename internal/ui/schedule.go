@@ -453,6 +453,14 @@ func (m Model) formatGameCard(game api.Game, selected bool, cardWidth int) strin
 	homeTeam := GetTeamShortName(homeFull)
 	awayColors := GetTeamColors(awayFull)
 	homeColors := GetTeamColors(homeFull)
+	awayFavorite := m.config.IsFavoriteTeam(awayFull)
+	homeFavorite := m.config.IsFavoriteTeam(homeFull)
+	if awayFavorite {
+		awayTeam = "* " + awayTeam
+	}
+	if homeFavorite {
+		homeTeam = "* " + homeTeam
+	}
 
 	// Content width = card width minus padding (1 each side)
 	// Border is outside Width, already accounted for in grid calculation
@@ -472,8 +480,16 @@ func (m Model) formatGameCard(game api.Game, selected bool, cardWidth int) strin
 		awayText := truncate(awayTeam+" "+awayRecord, contentWidth)
 		homeText := truncate(homeTeam+" "+homeRecord, contentWidth)
 
-		awayLine := lipgloss.NewStyle().Foreground(awayColors.Primary).Render(fmt.Sprintf("%-*s", contentWidth, awayText))
-		homeLine := lipgloss.NewStyle().Foreground(homeColors.Primary).Render(fmt.Sprintf("%-*s", contentWidth, homeText))
+		awayLineStyle := lipgloss.NewStyle().Foreground(awayColors.Primary)
+		if awayFavorite {
+			awayLineStyle = awayLineStyle.Bold(true)
+		}
+		homeLineStyle := lipgloss.NewStyle().Foreground(homeColors.Primary)
+		if homeFavorite {
+			homeLineStyle = homeLineStyle.Bold(true)
+		}
+		awayLine := awayLineStyle.Render(fmt.Sprintf("%-*s", contentWidth, awayText))
+		homeLine := homeLineStyle.Render(fmt.Sprintf("%-*s", contentWidth, homeText))
 
 		lines = []string{
 			lipgloss.NewStyle().Width(contentWidth).Render(status),
@@ -524,6 +540,12 @@ func (m Model) formatGameCard(game api.Game, selected bool, cardWidth int) strin
 		homeStyle := lipgloss.NewStyle().Foreground(homeColors.Primary)
 		scoreStyle := lipgloss.NewStyle().Bold(true)
 
+		if awayFavorite {
+			awayStyle = awayStyle.Bold(true)
+		}
+		if homeFavorite {
+			homeStyle = homeStyle.Bold(true)
+		}
 		if game.Status.AbstractGameState == "Final" {
 			if game.Teams.Away.IsWinner {
 				awayStyle = awayStyle.Bold(true)
@@ -543,10 +565,18 @@ func (m Model) formatGameCard(game api.Game, selected bool, cardWidth int) strin
 		lines = []string{statusLine, awayLine, homeLine}
 
 	default:
+		awayDefault := lipgloss.NewStyle().Foreground(awayColors.Primary)
+		if awayFavorite {
+			awayDefault = awayDefault.Bold(true)
+		}
+		homeDefault := lipgloss.NewStyle().Foreground(homeColors.Primary)
+		if homeFavorite {
+			homeDefault = homeDefault.Bold(true)
+		}
 		lines = []string{
 			status,
-			awayTeam,
-			homeTeam,
+			awayDefault.Render(awayTeam),
+			homeDefault.Render(homeTeam),
 		}
 	}
 

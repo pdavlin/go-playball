@@ -254,6 +254,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.games) > 0 && m.selectedGameIdx >= len(m.games) {
 				m.selectedGameIdx = len(m.games) - 1
 			}
+			if m.config.FocusFavoriteTeam {
+				for i, g := range m.games {
+					if m.config.IsFavoriteTeam(g.Teams.Away.Team.Name) ||
+						m.config.IsFavoriteTeam(g.Teams.Home.Team.Name) {
+						m.selectedGameIdx = i
+						break
+					}
+				}
+			}
 		}
 		cmds = append(cmds, scheduleTick(m.config.ScheduleRefreshSeconds))
 

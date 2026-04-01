@@ -11,6 +11,7 @@ import (
 // Config holds application configuration
 type Config struct {
 	FavoriteTeams          []string         `json:"favorite_teams"`
+	FocusFavoriteTeam      bool             `json:"focus_favorite_team"`
 	ScheduleRefreshSeconds int              `json:"schedule_refresh_seconds"`
 	Colors                 ColorConfig      `json:"colors"`
 	EventColors            EventColorConfig `json:"event_colors"`
@@ -44,6 +45,7 @@ type EventColorConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		FavoriteTeams:          []string{},
+		FocusFavoriteTeam:      false,
 		ScheduleRefreshSeconds: 30,
 		Colors: ColorConfig{
 			Primary:   "#00D9FF",
@@ -204,6 +206,11 @@ func (c *Config) GetKey(key string) (string, error) {
 	switch key {
 	case "favorite_teams":
 		return strings.Join(c.FavoriteTeams, ", "), nil
+	case "focus_favorite_team":
+		if c.FocusFavoriteTeam {
+			return "true", nil
+		}
+		return "false", nil
 	case "schedule_refresh_seconds":
 		return fmt.Sprintf("%d", c.ScheduleRefreshSeconds), nil
 	case "colors.primary":
@@ -246,6 +253,8 @@ func (c *Config) GetKey(key string) (string, error) {
 // SetKey sets a config value by dot-notated key and saves to disk
 func (c *Config) SetKey(key, value string) error {
 	switch key {
+	case "focus_favorite_team":
+		c.FocusFavoriteTeam = value == "true" || value == "1" || value == "yes"
 	case "favorite_teams":
 		for _, team := range c.FavoriteTeams {
 			if team == value {
@@ -304,6 +313,8 @@ func (c *Config) SetKey(key, value string) error {
 func (c *Config) UnsetKey(key string) error {
 	defaults := DefaultConfig()
 	switch key {
+	case "focus_favorite_team":
+		c.FocusFavoriteTeam = defaults.FocusFavoriteTeam
 	case "favorite_teams":
 		c.FavoriteTeams = []string{}
 	case "schedule_refresh_seconds":
@@ -350,6 +361,7 @@ func (c *Config) UnsetKey(key string) error {
 func ValidKeys() []string {
 	return []string{
 		"favorite_teams",
+		"focus_favorite_team",
 		"schedule_refresh_seconds",
 		"colors.primary",
 		"colors.secondary",
