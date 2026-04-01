@@ -149,6 +149,7 @@ func handleConfigCommand(cfg *config.Config) {
 func printConfig(cfg *config.Config) {
 	fmt.Println("Current Configuration:")
 	fmt.Printf("Favorite Teams: %v\n", cfg.FavoriteTeams)
+	fmt.Printf("Focus Favorite Team: %v\n", cfg.FocusFavoriteTeam)
 	fmt.Println("Colors:")
 	fmt.Printf("  primary:    %s\n", cfg.Colors.Primary)
 	fmt.Printf("  secondary:  %s\n", cfg.Colors.Secondary)
@@ -202,6 +203,7 @@ CONFIGURATION:
 
     Available config keys:
     favorite_teams              Add a favorite team (use team's full name)
+    focus_favorite_team         Auto-focus favorite team's game on schedule load (true/false)
     colors.primary              Primary theme color (hex)
     colors.secondary            Secondary theme color (hex)
     colors.accent               Accent theme color (hex)
@@ -223,6 +225,7 @@ CONFIGURATION:
 
 EXAMPLES:
     go-playball config favorite_teams "New York Yankees"
+    go-playball config focus_favorite_team true
     go-playball config colors.primary "#00D9FF"
     go-playball config event_colors.walk "#00FF00"
     go-playball config --unset event_colors.walk

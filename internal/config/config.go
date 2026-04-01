@@ -10,9 +10,10 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	FavoriteTeams []string         `json:"favorite_teams"`
-	Colors        ColorConfig      `json:"colors"`
-	EventColors   EventColorConfig `json:"event_colors"`
+	FavoriteTeams     []string         `json:"favorite_teams"`
+	FocusFavoriteTeam bool             `json:"focus_favorite_team"`
+	Colors            ColorConfig      `json:"colors"`
+	EventColors       EventColorConfig `json:"event_colors"`
 }
 
 // ColorConfig holds color customization
@@ -42,7 +43,8 @@ type EventColorConfig struct {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		FavoriteTeams: []string{},
+		FavoriteTeams:     []string{},
+		FocusFavoriteTeam: false,
 		Colors: ColorConfig{
 			Primary:   "#00D9FF",
 			Secondary: "#FFB86C",
@@ -101,6 +103,10 @@ func Load() (*Config, error) {
 // Handles migration from older config files missing new fields.
 func (c *Config) fillDefaults() {
 	defaults := DefaultConfig()
+
+	// FocusFavoriteTeam is a bool; its zero value (false) is the correct default,
+	// so no migration fill is needed for it.
+	_ = defaults
 
 	if c.Colors.Primary == "" {
 		c.Colors.Primary = defaults.Colors.Primary
@@ -198,6 +204,11 @@ func (c *Config) GetKey(key string) (string, error) {
 	switch key {
 	case "favorite_teams":
 		return strings.Join(c.FavoriteTeams, ", "), nil
+	case "focus_favorite_team":
+		if c.FocusFavoriteTeam {
+			return "true", nil
+		}
+		return "false", nil
 	case "colors.primary":
 		return c.Colors.Primary, nil
 	case "colors.secondary":
@@ -238,6 +249,8 @@ func (c *Config) GetKey(key string) (string, error) {
 // SetKey sets a config value by dot-notated key and saves to disk
 func (c *Config) SetKey(key, value string) error {
 	switch key {
+	case "focus_favorite_team":
+		c.FocusFavoriteTeam = value == "true" || value == "1" || value == "yes"
 	case "favorite_teams":
 		for _, team := range c.FavoriteTeams {
 			if team == value {
@@ -287,6 +300,8 @@ func (c *Config) SetKey(key, value string) error {
 func (c *Config) UnsetKey(key string) error {
 	defaults := DefaultConfig()
 	switch key {
+	case "focus_favorite_team":
+		c.FocusFavoriteTeam = defaults.FocusFavoriteTeam
 	case "favorite_teams":
 		c.FavoriteTeams = []string{}
 	case "colors.primary":
@@ -331,6 +346,7 @@ func (c *Config) UnsetKey(key string) error {
 func ValidKeys() []string {
 	return []string{
 		"favorite_teams",
+		"focus_favorite_team",
 		"colors.primary",
 		"colors.secondary",
 		"colors.accent",
