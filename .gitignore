@@ -19,6 +19,7 @@ go.work
 
 # Build output
 playball
+go-playball
 dist/
 build/
 

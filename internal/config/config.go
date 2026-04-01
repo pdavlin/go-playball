@@ -10,9 +10,10 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	FavoriteTeams []string         `json:"favorite_teams"`
-	Colors        ColorConfig      `json:"colors"`
-	EventColors   EventColorConfig `json:"event_colors"`
+	FavoriteTeams          []string         `json:"favorite_teams"`
+	ScheduleRefreshSeconds int              `json:"schedule_refresh_seconds"`
+	Colors                 ColorConfig      `json:"colors"`
+	EventColors            EventColorConfig `json:"event_colors"`
 }
 
 // ColorConfig holds color customization
@@ -42,7 +43,8 @@ type EventColorConfig struct {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		FavoriteTeams: []string{},
+		FavoriteTeams:          []string{},
+		ScheduleRefreshSeconds: 30,
 		Colors: ColorConfig{
 			Primary:   "#00D9FF",
 			Secondary: "#FFB86C",
@@ -101,6 +103,10 @@ func Load() (*Config, error) {
 // Handles migration from older config files missing new fields.
 func (c *Config) fillDefaults() {
 	defaults := DefaultConfig()
+
+	if c.ScheduleRefreshSeconds == 0 {
+		c.ScheduleRefreshSeconds = defaults.ScheduleRefreshSeconds
+	}
 
 	if c.Colors.Primary == "" {
 		c.Colors.Primary = defaults.Colors.Primary
@@ -198,6 +204,8 @@ func (c *Config) GetKey(key string) (string, error) {
 	switch key {
 	case "favorite_teams":
 		return strings.Join(c.FavoriteTeams, ", "), nil
+	case "schedule_refresh_seconds":
+		return fmt.Sprintf("%d", c.ScheduleRefreshSeconds), nil
 	case "colors.primary":
 		return c.Colors.Primary, nil
 	case "colors.secondary":
@@ -245,6 +253,15 @@ func (c *Config) SetKey(key, value string) error {
 			}
 		}
 		c.FavoriteTeams = append(c.FavoriteTeams, value)
+	case "schedule_refresh_seconds":
+		var n int
+		if _, err := fmt.Sscanf(value, "%d", &n); err != nil {
+			return fmt.Errorf("schedule_refresh_seconds must be an integer: %w", err)
+		}
+		if n < 5 {
+			n = 5
+		}
+		c.ScheduleRefreshSeconds = n
 	case "colors.primary":
 		c.Colors.Primary = value
 	case "colors.secondary":
@@ -289,6 +306,8 @@ func (c *Config) UnsetKey(key string) error {
 	switch key {
 	case "favorite_teams":
 		c.FavoriteTeams = []string{}
+	case "schedule_refresh_seconds":
+		c.ScheduleRefreshSeconds = defaults.ScheduleRefreshSeconds
 	case "colors.primary":
 		c.Colors.Primary = defaults.Colors.Primary
 	case "colors.secondary":
@@ -331,6 +350,7 @@ func (c *Config) UnsetKey(key string) error {
 func ValidKeys() []string {
 	return []string{
 		"favorite_teams",
+		"schedule_refresh_seconds",
 		"colors.primary",
 		"colors.secondary",
 		"colors.accent",
