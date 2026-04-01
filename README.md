@@ -6,9 +6,22 @@ A terminal-based MLB game viewer built with [Bubble Tea](https://github.com/char
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install pdavlin/go-playball/go-playball
+```
+
+### Scoop (Windows)
+
+```powershell
+scoop bucket add go-playball https://github.com/pdavlin/scoop-go-playball
+scoop install go-playball
+```
+
 ### Download
 
-Grab the latest build for your platform from the [nightly release](https://github.com/pdavlin/go-playball/releases/tag/nightly).
+Grab the latest stable release or nightly build from [GitHub Releases](https://github.com/pdavlin/go-playball/releases).
 
 Available platforms: macOS (Intel & Apple Silicon), Linux (amd64 & arm64), Windows (amd64).
 
