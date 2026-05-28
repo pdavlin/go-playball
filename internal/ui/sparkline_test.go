@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -83,7 +84,7 @@ func TestRenderSparkline_Upsample(t *testing.T) {
 }
 
 func TestRenderBipolarSparkline_Shape(t *testing.T) {
-	// 5 rows above + 1 axis + 5 rows below = 11 lines.
+	// halfRows=5 → 10 lines (no dedicated axis row).
 	out := renderBipolarSparkline(
 		[]float64{50, 50, 50}, 3, 5,
 		lipgloss.Color("#FF0000"),
@@ -91,13 +92,13 @@ func TestRenderBipolarSparkline_Shape(t *testing.T) {
 		lipgloss.Color("#888888"),
 	)
 	lines := splitLines(out)
-	if len(lines) != 11 {
-		t.Fatalf("lines: want 11, got %d", len(lines))
+	if len(lines) != 10 {
+		t.Fatalf("lines: want 10, got %d", len(lines))
 	}
 }
 
 func TestRenderBipolarSparkline_HomeBelow(t *testing.T) {
-	// 100% home WP for all values: bars hit max depth on the below side.
+	// 100% home WP for all values: bars hit max depth on below side.
 	out := renderBipolarSparkline(
 		[]float64{100, 100, 100}, 3, 4,
 		lipgloss.Color("#FF0000"),
@@ -105,18 +106,17 @@ func TestRenderBipolarSparkline_HomeBelow(t *testing.T) {
 		lipgloss.Color("#888888"),
 	)
 	lines := splitLines(out)
-	// 4 above + axis + 4 below = 9 lines
-	if len(lines) != 9 {
-		t.Fatalf("lines: want 9, got %d", len(lines))
+	if len(lines) != 8 {
+		t.Fatalf("lines: want 8, got %d", len(lines))
 	}
-	// Above rows should be all space.
+	// Above rows (0..3) should be empty.
 	for i := 0; i < 4; i++ {
 		if containsBlock(lines[i]) {
 			t.Fatalf("above row %d should be empty, got %q", i, lines[i])
 		}
 	}
-	// Below rows should contain full blocks.
-	for i := 5; i < 9; i++ {
+	// Below rows (4..7) should be full blocks.
+	for i := 4; i < 8; i++ {
 		if !containsBlock(lines[i]) {
 			t.Fatalf("below row %d should have blocks, got %q", i, lines[i])
 		}
@@ -136,10 +136,28 @@ func TestRenderBipolarSparkline_AwayAbove(t *testing.T) {
 			t.Fatalf("above row %d should have blocks, got %q", i, lines[i])
 		}
 	}
-	for i := 5; i < 9; i++ {
+	for i := 4; i < 8; i++ {
 		if containsBlock(lines[i]) {
 			t.Fatalf("below row %d should be empty, got %q", i, lines[i])
 		}
+	}
+}
+
+func TestRenderBipolarSparkline_CenterTick(t *testing.T) {
+	// All values at exactly 50 → axis tick on last above-row.
+	out := renderBipolarSparkline(
+		[]float64{50, 50, 50, 50}, 4, 3,
+		lipgloss.Color("#FF0000"),
+		lipgloss.Color("#0000FF"),
+		lipgloss.Color("#888888"),
+	)
+	lines := splitLines(out)
+	if len(lines) != 6 {
+		t.Fatalf("lines: want 6, got %d", len(lines))
+	}
+	// Row 2 (halfRows-1) should contain ▁ tick chars.
+	if !strings.ContainsRune(lines[2], '▁') {
+		t.Fatalf("expected ▁ tick on row 2, got %q", lines[2])
 	}
 }
 

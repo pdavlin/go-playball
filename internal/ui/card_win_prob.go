@@ -116,9 +116,9 @@ func renderWinProbChart(series []float64, width, height int,
 	}
 
 	halfRows := winProbSparkHalfRows
-	// Total chart height is halfRows*2 + 1 axis. Cap to roughly half
-	// the available height so the swings list still fits.
-	maxHalf := (height - 1) / 4
+	// Total chart height is halfRows*2. Cap to roughly half the
+	// available height so the swings list still fits.
+	maxHalf := height / 4
 	if halfRows > maxHalf {
 		halfRows = maxHalf
 	}
