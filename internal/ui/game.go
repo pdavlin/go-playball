@@ -45,6 +45,7 @@ func (m Model) handleGameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "g":
 		m.gameSubview = GameStatusSubview
 		m.gameScrollOffset = 0
+		m.liveTab = LiveTabPlays
 		return m, nil
 	}
 
@@ -106,6 +107,10 @@ func (m Model) handlePlaysKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // handleGameStatusKeys handles keys for the default live game status view
 func (m Model) handleGameStatusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "1":
+		m.liveTab = LiveTabPlays
+	case "2":
+		m.liveTab = LiveTabPitchMix
 	case "up", "k":
 		if m.gameScrollOffset > 0 {
 			m.gameScrollOffset--
@@ -379,7 +384,7 @@ func (m Model) renderLiveGameStatus(game *api.Game) string {
 	rightWidth := m.width - leftWidth - 3
 
 	leftCol := m.renderMatchupAndAtBat(game)
-	rightCol := m.renderPlays(game, availableHeight, rightWidth, false, true)
+	rightCol := m.renderLiveRightColumn(game, availableHeight, rightWidth)
 
 	leftStyled := lipgloss.NewStyle().
 		Width(leftWidth).

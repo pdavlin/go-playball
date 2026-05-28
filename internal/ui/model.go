@@ -34,6 +34,15 @@ const (
 	ScoringPlaysSubview
 )
 
+// LiveTab represents the active card in the right column of the live
+// game status view.
+type LiveTab int
+
+const (
+	LiveTabPlays LiveTab = iota
+	LiveTabPitchMix
+)
+
 // Model represents the main application state
 type Model struct {
 	view          View
@@ -61,6 +70,7 @@ type Model struct {
 	gameRawJSON        []byte
 	gameTimestamp      string
 	gameSubview        GameSubview
+	liveTab            LiveTab
 	focusedPanel       int
 	panelScrollOffsets [4]int
 
@@ -515,7 +525,7 @@ func (m Model) renderHelpBar() string {
 		case ScoringPlaysSubview:
 			help = "g: game | b: box score | a: all plays | p: scoring | jk: scroll | " + base
 		case GameStatusSubview:
-			help = "b: box score | a: all plays | p: scoring | jk: scroll | " + base
+			help = "1: Plays | 2: Mix | b: box score | a: all plays | p: scoring | jk: scroll | " + base
 		default:
 			help = "jk: scroll | " + base
 		}
