@@ -257,17 +257,21 @@ func (m Model) handleScheduleKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		spinnerCmd := m.startSpinner("Loading", colorPrimary, colorAccent)
 		return m, tea.Batch(spinnerCmd, loadSchedule(m.apiClient, m.scheduleDate))
 	case "r":
-		if !m.config.ScoutingEnabled() {
-			return m, nil
-		}
 		if m.selectedGameIdx < 0 || m.selectedGameIdx >= len(m.games) {
 			return m, nil
 		}
 		g := &m.games[m.selectedGameIdx]
-		if !isPreviewGame(g) {
+		kind, _, ok := reportKindFor(m.config.ScoutingEnabled(), g)
+		if !ok {
 			return m, nil
 		}
-		return m, m.openScoutingModal(g)
+		switch kind {
+		case reportKindScouting:
+			return m, m.openScoutingModal(g)
+		case reportKindRecap:
+			return m, m.openRecapModal(g)
+		}
+		return m, nil
 	}
 
 	// Keep selected game in bounds

@@ -87,12 +87,19 @@ go-playball config --unset event_colors.walk
 
 Run `go-playball help` for a full list of configuration keys.
 
-## Scouting reports (optional)
+## Scouting reports & postgame recaps (optional)
 
-Configure a provider and press `r` on a Preview game in the schedule view to
-stream a short scouting report from an LLM. Reports are cached at
-`~/.config/go-playball/scouting/{gamePk}.json`. Press `R` inside the modal to
-refresh.
+Configure a provider and press `r` on a game in the schedule view. The
+behavior is context-sensitive:
+
+- **Preview games** → streams a short scouting report. Cached at
+  `~/.config/go-playball/scouting/{gamePk}.json`.
+- **Final games** → streams a five-section postgame recap (How It Was
+  Won, Turning Point, On the Mound, Top Performer, Bullpen). Cached at
+  `~/.config/go-playball/recap/{gamePk}.json`.
+- **Live games** → no report; the help-bar entry is hidden.
+
+Press `R` (shift-r) inside the modal to bust the cache and re-stream.
 
 ### Supported providers
 

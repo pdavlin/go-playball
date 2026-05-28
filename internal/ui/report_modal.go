@@ -9,13 +9,28 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pdavlin/go-playball/internal/api"
+	"github.com/pdavlin/go-playball/internal/recap"
 	"github.com/pdavlin/go-playball/internal/scouting"
 	"github.com/pdavlin/go-playball/internal/ui/anim"
 )
 
-// scoutingModal is the streaming-report overlay rendered above the schedule
-// view when active.
-type scoutingModal struct {
+// reportKind disambiguates the two streaming-report flavors the modal
+// supports. They share rendering, scrolling, key handling, and event
+// folding — only the source channel, the spinner label, and the title
+// vary.
+type reportKind int
+
+const (
+	reportKindScouting reportKind = iota
+	reportKindRecap
+)
+
+// reportModal is the streaming-report overlay rendered above the
+// schedule view. One struct handles both scouting and recap; the
+// kind-specific stream is consumed via the nextEvent closure that the
+// open* helpers install.
+type reportModal struct {
+	kind         reportKind
 	gamePk       int
 	matchupLabel string
 	spinner      *anim.Spinner
@@ -26,20 +41,77 @@ type scoutingModal struct {
 	scrollOffset int
 	streamDone   bool
 	cancel       context.CancelFunc
-	stream       <-chan scouting.Event
+	nextEvent    func() tea.Cmd
 }
 
-type scoutingEventMsg struct {
+// reportEventKind mirrors scouting.EventKind / recap.EventKind. The
+// adapters at the source-package boundary translate to this so the
+// modal's apply path is type-agnostic.
+type reportEventKind int
+
+const (
+	reportEventDelta reportEventKind = iota
+	reportEventDone
+	reportEventError
+)
+
+type reportEvent struct {
+	Kind     reportEventKind
+	Text     string
+	Err      error
+	Cached   bool
+	CachedAt time.Time
+}
+
+type reportEventMsg struct {
 	gamePk int
-	ev     scouting.Event
+	ev     reportEvent
 }
 
-type scoutingClosedMsg struct {
+type reportClosedMsg struct {
 	gamePk int
 }
 
-// openScoutingModal builds the modal, kicks off Generate, and returns the
-// first command that drains one event from the stream.
+func scoutingToReport(e scouting.Event) reportEvent {
+	return reportEvent{
+		Kind:     reportEventKind(e.Kind),
+		Text:     e.Text,
+		Err:      e.Err,
+		Cached:   e.Cached,
+		CachedAt: e.CachedAt,
+	}
+}
+
+func recapToReport(e recap.Event) reportEvent {
+	return reportEvent{
+		Kind:     reportEventKind(e.Kind),
+		Text:     e.Text,
+		Err:      e.Err,
+		Cached:   e.Cached,
+		CachedAt: e.CachedAt,
+	}
+}
+
+func nextScoutingEventCmd(ch <-chan scouting.Event, gamePk int) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return reportClosedMsg{gamePk: gamePk}
+		}
+		return reportEventMsg{gamePk: gamePk, ev: scoutingToReport(ev)}
+	}
+}
+
+func nextRecapEventCmd(ch <-chan recap.Event, gamePk int) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return reportClosedMsg{gamePk: gamePk}
+		}
+		return reportEventMsg{gamePk: gamePk, ev: recapToReport(ev)}
+	}
+}
+
 func (m *Model) openScoutingModal(g *api.Game) tea.Cmd {
 	if m.scoutingCache == nil {
 		dir, err := scouting.DefaultCacheDir()
@@ -47,7 +119,40 @@ func (m *Model) openScoutingModal(g *api.Game) tea.Cmd {
 			m.scoutingCache = scouting.NewCache(dir)
 		}
 	}
+	return m.openReportModal(reportKindScouting, g, "Scouting", func(ctx context.Context) (tea.Cmd, error) {
+		stream, err := scouting.Generate(ctx, m.config.ScoutingValue(), m.scoutingCache, m.apiClient, g)
+		if err != nil {
+			return nil, err
+		}
+		return nextScoutingEventCmd(stream, g.ID), nil
+	})
+}
 
+func (m *Model) openRecapModal(g *api.Game) tea.Cmd {
+	if m.recapCache == nil {
+		dir, err := recap.DefaultCacheDir()
+		if err == nil {
+			m.recapCache = recap.NewCache(dir)
+		}
+	}
+	return m.openReportModal(reportKindRecap, g, "Recapping", func(ctx context.Context) (tea.Cmd, error) {
+		stream, err := recap.Generate(ctx, m.config.ScoutingValue(), m.recapCache, m.apiClient, g)
+		if err != nil {
+			return nil, err
+		}
+		return nextRecapEventCmd(stream, g.ID), nil
+	})
+}
+
+// openReportModal builds the modal scaffold and starts the stream. The
+// startStream closure decouples the modal layer from the choice of
+// generator package.
+func (m *Model) openReportModal(
+	kind reportKind,
+	g *api.Game,
+	spinnerLabel string,
+	startStream func(ctx context.Context) (tea.Cmd, error),
+) tea.Cmd {
 	matchup := fmt.Sprintf("%s @ %s",
 		shortOrName(g.Teams.Away.Team),
 		shortOrName(g.Teams.Home.Team),
@@ -55,55 +160,46 @@ func (m *Model) openScoutingModal(g *api.Game) tea.Cmd {
 
 	awayColors := GetTeamColors(g.Teams.Away.Team.Name)
 	homeColors := GetTeamColors(g.Teams.Home.Team.Name)
-	sp := anim.NewCyclingSpinner(15, "Scouting", awayColors.Primary, homeColors.Primary)
+	sp := anim.NewCyclingSpinner(15, spinnerLabel, awayColors.Primary, homeColors.Primary)
 	sp, spinnerCmd := sp.Start()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := scouting.Generate(ctx, m.config.ScoutingValue(), m.scoutingCache, m.apiClient, g)
+	nextCmd, err := startStream(ctx)
 	if err != nil {
 		cancel()
-		modal := &scoutingModal{
+		m.reportModal = &reportModal{
+			kind:         kind,
 			gamePk:       g.ID,
 			matchupLabel: matchup,
 			err:          err,
 			streamDone:   true,
 		}
-		m.scoutingModal = modal
 		return nil
 	}
 
-	modal := &scoutingModal{
+	mod := &reportModal{
+		kind:         kind,
 		gamePk:       g.ID,
 		matchupLabel: matchup,
 		spinner:      sp,
 		cancel:       cancel,
-		stream:       stream,
+		nextEvent:    func() tea.Cmd { return nextCmd },
 	}
-	m.scoutingModal = modal
+	m.reportModal = mod
 
-	return tea.Batch(spinnerCmd, nextScoutingEvent(stream, g.ID))
-}
-
-func nextScoutingEvent(ch <-chan scouting.Event, gamePk int) tea.Cmd {
-	return func() tea.Msg {
-		ev, ok := <-ch
-		if !ok {
-			return scoutingClosedMsg{gamePk: gamePk}
-		}
-		return scoutingEventMsg{gamePk: gamePk, ev: ev}
-	}
+	return tea.Batch(spinnerCmd, nextCmd)
 }
 
 // applyEvent folds one event into the modal state.
-func (mod *scoutingModal) applyEvent(ev scouting.Event) {
+func (mod *reportModal) applyEvent(ev reportEvent) {
 	switch ev.Kind {
-	case scouting.EventDelta:
+	case reportEventDelta:
 		mod.body.WriteString(ev.Text)
 		if ev.Cached {
 			mod.cached = true
 			mod.cachedAt = ev.CachedAt
 		}
-	case scouting.EventDone:
+	case reportEventDone:
 		mod.streamDone = true
 		if ev.Cached {
 			mod.cached = true
@@ -112,7 +208,7 @@ func (mod *scoutingModal) applyEvent(ev scouting.Event) {
 		if mod.spinner != nil {
 			mod.spinner = mod.spinner.Pause()
 		}
-	case scouting.EventError:
+	case reportEventError:
 		mod.streamDone = true
 		mod.err = ev.Err
 		if mod.spinner != nil {
@@ -121,10 +217,10 @@ func (mod *scoutingModal) applyEvent(ev scouting.Event) {
 	}
 }
 
-// handleKey processes a key while the modal owns the keyboard. The returned
-// bool signals whether the parent should clear m.scoutingModal.
-func (m *Model) handleScoutingKey(msg tea.KeyMsg) (close bool, cmd tea.Cmd) {
-	mod := m.scoutingModal
+// handleReportKey processes a key while the modal owns the keyboard.
+// The returned bool signals whether the parent should clear m.reportModal.
+func (m *Model) handleReportKey(msg tea.KeyMsg) (closeModal bool, cmd tea.Cmd) {
+	mod := m.reportModal
 	if mod == nil {
 		return false, nil
 	}
@@ -138,18 +234,27 @@ func (m *Model) handleScoutingKey(msg tea.KeyMsg) (close bool, cmd tea.Cmd) {
 		if !mod.streamDone {
 			return false, nil
 		}
-		// Find the game we opened on by gamePk so refresh works after
-		// schedule re-fetches.
 		game := m.findGameByID(mod.gamePk)
 		if game == nil {
 			return false, nil
 		}
-		_ = scouting.Delete(m.scoutingCache, mod.gamePk)
-		if mod.cancel != nil {
-			mod.cancel()
+		switch mod.kind {
+		case reportKindScouting:
+			_ = scouting.Delete(m.scoutingCache, mod.gamePk)
+			if mod.cancel != nil {
+				mod.cancel()
+			}
+			m.reportModal = nil
+			return false, m.openScoutingModal(game)
+		case reportKindRecap:
+			_ = recap.Delete(m.recapCache, mod.gamePk)
+			if mod.cancel != nil {
+				mod.cancel()
+			}
+			m.reportModal = nil
+			return false, m.openRecapModal(game)
 		}
-		m.scoutingModal = nil
-		return false, m.openScoutingModal(game)
+		return false, nil
 	case "j", "down":
 		mod.scrollOffset++
 		return false, nil
@@ -171,12 +276,10 @@ func (m *Model) findGameByID(id int) *api.Game {
 	return nil
 }
 
-// renderScoutingModal composes the modal panel and overlays it on top of
-// bg (the underlying schedule view). Sizes the modal to min(80, width-4)
-// x min(24, height-4) and centers it. ANSI styles in bg are preserved on
-// the unaffected sides via overlay().
-func (m Model) renderScoutingModal(bg string) string {
-	mod := m.scoutingModal
+// renderReportModal composes the modal panel and overlays it on top of
+// bg (the underlying schedule view).
+func (m Model) renderReportModal(bg string) string {
+	mod := m.reportModal
 	if mod == nil {
 		return bg
 	}
@@ -190,39 +293,38 @@ func (m Model) renderScoutingModal(bg string) string {
 		outerH = 8
 	}
 
-	innerW := outerW - 4 // padding(1,2) on both sides
+	innerW := outerW - 4
 
-	header := m.renderScoutingHeader(mod, innerW)
-	body := m.renderScoutingBody(mod, innerW, outerH-3)
+	header := m.renderReportHeader(mod, innerW)
+	body := m.renderReportBody(mod, innerW, outerH-3)
 
 	content := header + "\n\n" + body
 	panel := modalBorder.Width(outerW).Render(content)
 
-	// Center: leave equal margin on left/top (rounded down).
 	panelHeight := strings.Count(panel, "\n") + 1
 	x := (m.width - outerW) / 2
 	y := (m.height - panelHeight) / 2
 	return overlay(bg, panel, x, y)
 }
 
-func (m Model) renderScoutingHeader(mod *scoutingModal, width int) string {
-	title := fmt.Sprintf("Scouting · %s", mod.matchupLabel)
-	switch {
-	case mod.cached && mod.streamDone:
+func (m Model) renderReportHeader(mod *reportModal, width int) string {
+	prefix := "Scouting"
+	if mod.kind == reportKindRecap {
+		prefix = "Postgame"
+	}
+	title := fmt.Sprintf("%s · %s", prefix, mod.matchupLabel)
+	if mod.cached && mod.streamDone {
 		suffix := modalDim.Render(fmt.Sprintf(" (cached %s)", relativeTime(mod.cachedAt)))
 		return modalSectionHeader.Render(title) + suffix
-	default:
-		// The spinner has moved inline to the body trailer; the header
-		// stays calm to keep focus on the streaming text.
-		return modalSectionHeader.Render(title)
 	}
+	return modalSectionHeader.Render(title)
 }
 
 // trailerLen is the visual width of the render-ahead spinner block that
 // trails the latest streamed token.
 const trailerLen = 10
 
-func (m Model) renderScoutingBody(mod *scoutingModal, width, height int) string {
+func (m Model) renderReportBody(mod *reportModal, width, height int) string {
 	if mod.err != nil {
 		body := modalErrorText.Render(mod.err.Error())
 		hint := modalDim.Render("press R to retry, esc to close")
@@ -239,7 +341,7 @@ func (m Model) renderScoutingBody(mod *scoutingModal, width, height int) string 
 		return modalDim.Render("waiting for first token…")
 	}
 
-	rendered := renderScoutingMarkdown(raw, width)
+	rendered := renderReportMarkdown(raw, width)
 	if streaming && mod.spinner != nil {
 		rendered = appendTrailer(rendered, mod.spinner.TrailerView(trailerLen), width)
 	}
@@ -259,8 +361,7 @@ func (m Model) renderScoutingBody(mod *scoutingModal, width, height int) string 
 }
 
 // appendTrailer appends trailer to the last line of rendered if it fits;
-// otherwise wraps the trailer onto a new line. Width is the modal's inner
-// content width.
+// otherwise wraps the trailer onto a new line.
 func appendTrailer(rendered, trailer string, width int) string {
 	if trailer == "" {
 		return rendered
@@ -275,16 +376,15 @@ func appendTrailer(rendered, trailer string, width int) string {
 	case remaining >= tw:
 		lines[len(lines)-1] = last + trailer
 	default:
-		// Trailer doesn't fit on this line — drop to next.
 		lines = append(lines, trailer)
 	}
 	return strings.Join(lines, "\n")
 }
 
-// renderScoutingMarkdown is a deliberately minimal renderer: lines starting
+// renderReportMarkdown is a deliberately minimal renderer: lines starting
 // with "## " become bold-styled headers; everything else is wrapped to
 // width. No external markdown library.
-func renderScoutingMarkdown(s string, width int) string {
+func renderReportMarkdown(s string, width int) string {
 	if width < 10 {
 		width = 10
 	}
@@ -368,10 +468,30 @@ func shortOrName(t api.Team) string {
 	return GetTeamShortName(t.Name)
 }
 
-// isPreviewGame reports whether g is in a state where scouting is meaningful.
-func isPreviewGame(g *api.Game) bool {
-	if g == nil {
-		return false
+// reportKindFor returns the report kind appropriate for g, plus the
+// help-bar label fragment ("scouting" / "recap"), or false if no report
+// is available (game state mismatch or scouting not configured).
+func reportKindFor(cfgEnabled bool, g *api.Game) (reportKind, string, bool) {
+	if !cfgEnabled || g == nil {
+		return 0, "", false
 	}
-	return g.Status.AbstractGameState == "Preview"
+	state := gameAbstractState(g)
+	switch state {
+	case "Preview":
+		return reportKindScouting, "scouting", true
+	case "Final":
+		return reportKindRecap, "recap", true
+	default:
+		return 0, "", false
+	}
+}
+
+func gameAbstractState(g *api.Game) string {
+	if g == nil {
+		return ""
+	}
+	if g.GameData != nil && g.GameData.Status.AbstractGameState != "" {
+		return g.GameData.Status.AbstractGameState
+	}
+	return g.Status.AbstractGameState
 }

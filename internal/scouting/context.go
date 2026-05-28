@@ -48,6 +48,12 @@ func BuildContext(ctx context.Context, c *api.Client, g *api.Game) (Context, err
 		return Context{}, fmt.Errorf("scouting: nil game")
 	}
 
+	// Snapshot the schedule-side team identity before hydration; the live
+	// feed leaves top-level teams.* empty so we'd otherwise lose Name and
+	// Abbreviation.
+	awaySnap := api.SnapshotAwayIdentity(g)
+	homeSnap := api.SnapshotHomeIdentity(g)
+
 	// Schedule-view games carry only team + linescore. Hydrate from the
 	// live feed so ProbablePitchers, battingOrder, and gameData.players are
 	// available. Failure is non-fatal — we fall back to whatever the
@@ -58,24 +64,27 @@ func BuildContext(ctx context.Context, c *api.Client, g *api.Game) (Context, err
 		}
 	}
 
+	awayID := api.ResolveTeam(g, "away", awaySnap)
+	homeID := api.ResolveTeam(g, "home", homeSnap)
+
 	out := Context{
 		GamePk:        g.ID,
 		GameDateLocal: formatGameDate(g),
 		Venue:         venueName(g),
 		Away: TeamCtx{
-			Name:         g.Teams.Away.Team.Name,
-			Abbreviation: g.Teams.Away.Team.Abbreviation,
-			Record:       formatRecord(g.Teams.Away.LeagueRecord),
+			Name:         awayID.Name,
+			Abbreviation: awayID.Abbreviation,
+			Record:       formatRecord(awayID.LeagueRecord),
 		},
 		Home: TeamCtx{
-			Name:         g.Teams.Home.Team.Name,
-			Abbreviation: g.Teams.Home.Team.Abbreviation,
-			Record:       formatRecord(g.Teams.Home.LeagueRecord),
+			Name:         homeID.Name,
+			Abbreviation: homeID.Abbreviation,
+			Record:       formatRecord(homeID.LeagueRecord),
 		},
 	}
 
-	awayID := g.Teams.Away.Team.ID
-	homeID := g.Teams.Home.Team.ID
+	awayTeamID := awayID.ID
+	homeTeamID := homeID.ID
 	season := seasonYear(g)
 
 	var (
@@ -107,19 +116,19 @@ func BuildContext(ctx context.Context, c *api.Client, g *api.Game) (Context, err
 			homePitcher = line
 		}()
 	}
-	if awayID != 0 {
+	if awayTeamID != 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			line, _ := c.FetchTeamHittingStats(awayID, season)
+			line, _ := c.FetchTeamHittingStats(awayTeamID, season)
 			awayHit = line
 		}()
 	}
-	if homeID != 0 {
+	if homeTeamID != 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			line, _ := c.FetchTeamHittingStats(homeID, season)
+			line, _ := c.FetchTeamHittingStats(homeTeamID, season)
 			homeHit = line
 		}()
 	}
