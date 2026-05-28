@@ -154,7 +154,7 @@ func renderWinProbSwings(swings []winProbSwing, awayAbbr, homeAbbr string,
 		Foreground(lipgloss.AdaptiveColor{Light: "#444444", Dark: "#CCCCCC"})
 
 	var lines []string
-	lines = append(lines, sectionStyle.Render("Recent swings"))
+	lines = append(lines, sectionStyle.Render("Big plays"))
 
 	// Walk newest to oldest.
 	for i := len(swings) - 1; i >= 0; i-- {
