@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pdavlin/go-playball/internal/api"
 	"github.com/pdavlin/go-playball/internal/config"
+	"github.com/pdavlin/go-playball/internal/scouting"
 	"github.com/pdavlin/go-playball/internal/ui/anim"
 )
 
@@ -71,6 +72,11 @@ type Model struct {
 	expectedGameID int
 	// If set, launch directly into this game on init
 	initialGameID int
+
+	// Scouting state. scoutingModal is non-nil when the overlay is active;
+	// scoutingCache is created lazily on first open.
+	scoutingModal *scoutingModal
+	scoutingCache *scouting.Cache
 }
 
 // Message types for async operations
@@ -178,6 +184,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Modal owns the keyboard while open. ctrl+c still quits.
+		if m.scoutingModal != nil {
+			if msg.String() == "ctrl+c" {
+				if m.scoutingModal.cancel != nil {
+					m.scoutingModal.cancel()
+				}
+				return m, tea.Quit
+			}
+			closeModal, cmd := m.handleScoutingKey(msg)
+			if closeModal {
+				m.scoutingModal = nil
+			}
+			return m, cmd
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -385,6 +405,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == ScheduleView {
 			cmds = append(cmds, loadSchedule(m.apiClient, m.scheduleDate))
 		}
+
+	case scoutingEventMsg:
+		if m.scoutingModal != nil && m.scoutingModal.gamePk == msg.gamePk {
+			m.scoutingModal.applyEvent(msg.ev)
+			if !m.scoutingModal.streamDone {
+				cmds = append(cmds, nextScoutingEvent(m.scoutingModal.stream, m.scoutingModal.gamePk))
+			}
+		}
+
+	case scoutingClosedMsg:
+		if m.scoutingModal != nil && m.scoutingModal.gamePk == msg.gamePk {
+			m.scoutingModal.streamDone = true
+			if m.scoutingModal.spinner != nil {
+				m.scoutingModal.spinner = m.scoutingModal.spinner.Pause()
+			}
+		}
+	}
+
+	// Keep the modal spinner ticking while open and streaming.
+	if m.scoutingModal != nil && m.scoutingModal.spinner != nil {
+		if tickMsg, ok := msg.(anim.SpinnerTickMsg); ok {
+			var cmd tea.Cmd
+			m.scoutingModal.spinner, cmd = m.scoutingModal.spinner.Update(tickMsg)
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -423,7 +468,25 @@ func (m Model) View() string {
 		}
 	}
 
-	return fmt.Sprintf("%s\n%s", content, helpBar)
+	rendered := fmt.Sprintf("%s\n%s", content, helpBar)
+
+	if m.scoutingModal != nil {
+		rendered = m.renderScoutingModal(rendered)
+	}
+
+	return rendered
+}
+
+// scoutingHelpVisible reports whether the help bar should include the
+// "r: scouting" entry for the current schedule selection.
+func (m Model) scoutingHelpVisible() bool {
+	if !m.config.ScoutingEnabled() {
+		return false
+	}
+	if m.selectedGameIdx < 0 || m.selectedGameIdx >= len(m.games) {
+		return false
+	}
+	return isPreviewGame(&m.games[m.selectedGameIdx])
 }
 
 // renderHelpBar renders the help bar with keyboard shortcuts
@@ -432,6 +495,9 @@ func (m Model) renderHelpBar() string {
 	switch m.view {
 	case ScheduleView:
 		help = "c: schedule | s: standings | hjkl/arrows: navigate | enter: view game | p/n: prev/next day | t: today | q: quit"
+		if m.scoutingHelpVisible() {
+			help = "r: scouting | " + help
+		}
 	case StandingsView:
 		help = "c: schedule | s: standings | q: quit"
 	case GameView:

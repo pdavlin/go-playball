@@ -86,3 +86,52 @@ go-playball config --unset event_colors.walk
 ```
 
 Run `go-playball help` for a full list of configuration keys.
+
+## Scouting reports (optional)
+
+Configure a provider and press `r` on a Preview game in the schedule view to
+stream a short scouting report from an LLM. Reports are cached at
+`~/.config/go-playball/scouting/{gamePk}.json`. Press `R` inside the modal to
+refresh.
+
+### Supported providers
+
+| `scouting.provider` | Required keys                                  | Notes                                                       |
+|---------------------|------------------------------------------------|-------------------------------------------------------------|
+| `anthropic`         | `api_key`, `model`                             | Anthropic Messages API. Model e.g. `claude-haiku-4-5-20251001`. |
+| `openrouter`        | `api_key`, `model`                             | OpenRouter chat-completion API. Model e.g. `anthropic/claude-3.5-haiku` or `openai/gpt-4o-mini`. |
+| `openai-compatible` | `base_url`, `model` (api_key optional)         | Any OpenAI-compatible server: OpenAI, Groq, Together, Ollama, LM Studio. `base_url` is the server root (do not include `/v1/chat/completions`). |
+
+Anthropic:
+
+```bash
+go-playball config scouting.provider anthropic
+go-playball config scouting.api_key   "sk-ant-..."
+go-playball config scouting.model     "claude-haiku-4-5-20251001"
+```
+
+OpenRouter:
+
+```bash
+go-playball config scouting.provider openrouter
+go-playball config scouting.api_key   "sk-or-..."
+go-playball config scouting.model     "anthropic/claude-3.5-haiku"
+```
+
+Local Ollama (OpenAI-compatible):
+
+```bash
+go-playball config scouting.provider openai-compatible
+go-playball config scouting.base_url  "http://localhost:11434"
+go-playball config scouting.model     "llama3.2"
+# api_key intentionally unset
+```
+
+Validate credentials and connectivity without launching the TUI:
+
+```bash
+go-playball scouting test
+```
+
+Without a provider configured, the feature is invisible: no help-bar entry,
+no key binding, no network calls.

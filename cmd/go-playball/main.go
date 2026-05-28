@@ -40,6 +40,9 @@ func main() {
 		case "config":
 			handleConfigCommand(cfg)
 			return
+		case "scouting":
+			handleScoutingCommand(cfg)
+			return
 		case "live":
 			handleLiveCommand()
 			return
@@ -189,6 +192,7 @@ USAGE:
     go-playball config <key>               Get a configuration value
     go-playball config <key> <value>       Set a configuration value
     go-playball config --unset <key>       Reset a key to its default
+    go-playball scouting test              Ping the configured LLM provider
     go-playball help                       Show this help message
     go-playball version                    Show version information
 

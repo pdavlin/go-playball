@@ -3,18 +3,60 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// Config holds application configuration
+// Config holds application configuration. The Scouting field uses a pointer
+// so that a zero-value (uninitialized) block is omitted from serialization,
+// allowing existing config.json files to round-trip unchanged.
 type Config struct {
 	FavoriteTeams          []string         `json:"favorite_teams"`
 	FocusFavoriteTeam      bool             `json:"focus_favorite_team"`
 	ScheduleRefreshSeconds int              `json:"schedule_refresh_seconds"`
 	Colors                 ColorConfig      `json:"colors"`
 	EventColors            EventColorConfig `json:"event_colors"`
+	Scouting               *Scouting        `json:"scouting,omitempty"`
+}
+
+// Scouting holds LLM-backed scouting-report configuration.
+type Scouting struct {
+	Provider    string  `json:"provider,omitempty"`
+	APIKey      string  `json:"api_key,omitempty"`
+	Model       string  `json:"model,omitempty"`
+	BaseURL     string  `json:"base_url,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+}
+
+// ScoutingValue returns the Scouting block by value, or a zero Scouting when
+// the feature has never been configured. Callers can read fields without
+// nil checks.
+func (c *Config) ScoutingValue() Scouting {
+	if c.Scouting == nil {
+		return Scouting{}
+	}
+	return *c.Scouting
+}
+
+// scoutingOrInit returns a non-nil Scouting pointer on c, lazily allocating
+// when the block has not yet been initialized.
+func (c *Config) scoutingOrInit() *Scouting {
+	if c.Scouting == nil {
+		c.Scouting = &Scouting{}
+	}
+	return c.Scouting
+}
+
+// ScoutingEnabled reports whether the scouting feature has the minimum config
+// required to make a request.
+func (c *Config) ScoutingEnabled() bool {
+	if c.Scouting == nil {
+		return false
+	}
+	return c.Scouting.Provider != "" && c.Scouting.APIKey != "" && c.Scouting.Model != ""
 }
 
 // ColorConfig holds color customization
@@ -245,9 +287,33 @@ func (c *Config) GetKey(key string) (string, error) {
 		return c.EventColors.ScoreBadgeBg, nil
 	case "event_colors.live_inning":
 		return c.EventColors.LiveInning, nil
+	case "scouting.provider":
+		return c.ScoutingValue().Provider, nil
+	case "scouting.api_key":
+		return maskAPIKey(c.ScoutingValue().APIKey), nil
+	case "scouting.model":
+		return c.ScoutingValue().Model, nil
+	case "scouting.base_url":
+		return c.ScoutingValue().BaseURL, nil
+	case "scouting.max_tokens":
+		return fmt.Sprintf("%d", c.ScoutingValue().MaxTokens), nil
+	case "scouting.temperature":
+		return fmt.Sprintf("%g", c.ScoutingValue().Temperature), nil
 	default:
 		return "", fmt.Errorf("unknown config key: %s", key)
 	}
+}
+
+// maskAPIKey returns a masked representation of an API key for display.
+// Empty input yields empty output. Short keys collapse to a fixed mask.
+func maskAPIKey(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) <= 4 {
+		return "…" + s
+	}
+	return "…" + s[len(s)-4:]
 }
 
 // SetKey sets a config value by dot-notated key and saves to disk
@@ -303,6 +369,32 @@ func (c *Config) SetKey(key, value string) error {
 		c.EventColors.ScoreBadgeBg = value
 	case "event_colors.live_inning":
 		c.EventColors.LiveInning = value
+	case "scouting.provider":
+		c.scoutingOrInit().Provider = value
+	case "scouting.api_key":
+		c.scoutingOrInit().APIKey = value
+	case "scouting.model":
+		c.scoutingOrInit().Model = value
+	case "scouting.base_url":
+		if value != "" {
+			u, err := url.Parse(value)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+				return fmt.Errorf("scouting.base_url must be an http or https URL: %q", value)
+			}
+		}
+		c.scoutingOrInit().BaseURL = value
+	case "scouting.max_tokens":
+		var n int
+		if _, err := fmt.Sscanf(value, "%d", &n); err != nil {
+			return fmt.Errorf("scouting.max_tokens must be an integer: %w", err)
+		}
+		c.scoutingOrInit().MaxTokens = n
+	case "scouting.temperature":
+		var f float64
+		if _, err := fmt.Sscanf(value, "%g", &f); err != nil {
+			return fmt.Errorf("scouting.temperature must be a number: %w", err)
+		}
+		c.scoutingOrInit().Temperature = f
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -351,6 +443,27 @@ func (c *Config) UnsetKey(key string) error {
 		c.EventColors.ScoreBadgeBg = defaults.EventColors.ScoreBadgeBg
 	case "event_colors.live_inning":
 		c.EventColors.LiveInning = defaults.EventColors.LiveInning
+	case "scouting.provider", "scouting.api_key", "scouting.model",
+		"scouting.base_url", "scouting.max_tokens", "scouting.temperature":
+		if c.Scouting != nil {
+			switch key {
+			case "scouting.provider":
+				c.Scouting.Provider = ""
+			case "scouting.api_key":
+				c.Scouting.APIKey = ""
+			case "scouting.model":
+				c.Scouting.Model = ""
+			case "scouting.base_url":
+				c.Scouting.BaseURL = ""
+			case "scouting.max_tokens":
+				c.Scouting.MaxTokens = 0
+			case "scouting.temperature":
+				c.Scouting.Temperature = 0
+			}
+			if (*c.Scouting == Scouting{}) {
+				c.Scouting = nil
+			}
+		}
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -379,5 +492,11 @@ func ValidKeys() []string {
 		"event_colors.score_badge_fg",
 		"event_colors.score_badge_bg",
 		"event_colors.live_inning",
+		"scouting.provider",
+		"scouting.api_key",
+		"scouting.model",
+		"scouting.base_url",
+		"scouting.max_tokens",
+		"scouting.temperature",
 	}
 }

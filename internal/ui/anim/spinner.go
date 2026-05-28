@@ -8,7 +8,17 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
+
+// clampVisible truncates s to at most n visual cells, preserving ANSI
+// styling on the kept prefix.
+func clampVisible(s string, n int) string {
+	if ansi.StringWidth(s) <= n {
+		return s
+	}
+	return ansi.Truncate(s, n, "")
+}
 
 const (
 	SpinnerFPS        = 20
@@ -166,6 +176,25 @@ func (s *Spinner) Update(msg tea.Msg) (*Spinner, tea.Cmd) {
 	return s, s.Tick()
 }
 
+// TrailerView returns up to n cycling color-cycled chars sourced from the
+// spinner's current frame. Use it to render a "render-ahead" placeholder
+// at the tail of streaming text: as new tokens arrive, the trailer slides
+// forward, giving the illusion of cycling chars resolving into real text.
+// Returns an empty string when n <= 0 or the spinner has no frames.
+func (s *Spinner) TrailerView(n int) string {
+	if n <= 0 || len(s.frames) == 0 {
+		return ""
+	}
+	idx := s.frameIdx
+	if s.frameIdx < SpinnerFPS {
+		idx = s.frameIdx % len(s.dotFrames)
+		full := s.dotFrames[idx]
+		return clampVisible(full, n)
+	}
+	full := s.frames[s.frameIdx%len(s.frames)]
+	return clampVisible(full, n)
+}
+
 // View returns the current spinner frame with animated label.
 func (s *Spinner) View() string {
 	ellipsis := ellipsisSteps[(s.frameIdx/ellipsisAnimSpeed)%len(ellipsisSteps)]
@@ -175,7 +204,7 @@ func (s *Spinner) View() string {
 	if s.frameIdx < SpinnerFPS {
 		chars = s.dotFrames[s.frameIdx]
 	} else {
-		chars = s.frames[s.frameIdx%prerenderedFrames]
+		chars = s.frames[s.frameIdx%len(s.frames)]
 	}
 
 	return label + " " + chars
