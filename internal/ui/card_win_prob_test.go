@@ -49,14 +49,14 @@ func TestExtractWinProbSeries_HomeSeries(t *testing.T) {
 
 func TestExtractWinProbSeries_SwingHome(t *testing.T) {
 	plays := []api.WinProbPlay{
-		wpPlay(50, 50, "S1", ""),
-		wpPlay(62, 38, "HR", "Home run"),
+		wpPlay(50, 50, "Single", ""),
+		wpPlay(62, 38, "Home Run", "Home run"),
 	}
 	_, swings := extractWinProbSeries(plays)
 	if len(swings) != 1 {
 		t.Fatalf("swings: want 1, got %d", len(swings))
 	}
-	if swings[0].team != "home" || swings[0].delta != 12 || swings[0].event != "Home run" {
+	if swings[0].team != "home" || swings[0].delta != 12 || swings[0].event != "Home Run" {
 		t.Fatalf("unexpected swing: %+v", swings[0])
 	}
 }
@@ -88,6 +88,44 @@ func TestExtractWinProbSeries_MultipleSwings(t *testing.T) {
 	}
 	if swings[0].team != "home" || swings[1].team != "away" {
 		t.Fatalf("unexpected order: %+v", swings)
+	}
+}
+
+func TestShortenSwingEvent(t *testing.T) {
+	cases := []struct {
+		batter, event, want string
+	}{
+		{"Shohei Ohtani", "Home Run", "Shohei Ohtani home run"},
+		{"Alex Call", "Single", "Alex Call single"},
+		{"Sterlin Thompson", "Grounded Into DP", "Sterlin Thompson grounded into DP"},
+		{"", "Walk", "walk"},
+		{"Mookie Betts", "", "Mookie Betts"},
+	}
+	for _, c := range cases {
+		got := shortenSwingEvent(c.batter, c.event)
+		if got != c.want {
+			t.Fatalf("shortenSwingEvent(%q, %q): want %q, got %q",
+				c.batter, c.event, c.want, got)
+		}
+	}
+}
+
+func TestFormatHalfInning(t *testing.T) {
+	cases := []struct {
+		half string
+		inn  int
+		want string
+	}{
+		{"top", 5, "TOP 5"},
+		{"Top", 1, "TOP 1"},
+		{"bottom", 9, "BOT 9"},
+		{"", 3, "TOP 3"},
+	}
+	for _, c := range cases {
+		got := formatHalfInning(c.half, c.inn)
+		if got != c.want {
+			t.Fatalf("formatHalfInning(%q, %d): want %q, got %q", c.half, c.inn, c.want, got)
+		}
 	}
 }
 

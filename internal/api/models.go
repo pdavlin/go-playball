@@ -145,6 +145,8 @@ type PlayEvent struct {
 // are not present in feed/live; this is a separate endpoint.
 type WinProbPlay struct {
 	Result             PlayResult `json:"result"`
+	About              About      `json:"about"`
+	Matchup            Matchup    `json:"matchup"`
 	HomeWinProbability float64    `json:"homeTeamWinProbability"`
 	AwayWinProbability float64    `json:"awayTeamWinProbability"`
 }

@@ -16,9 +16,12 @@ const (
 )
 
 type winProbSwing struct {
-	delta float64 // home delta, signed
-	team  string  // "home" | "away"
-	event string  // play description / event name
+	delta      float64 // home delta, signed
+	team       string  // "home" | "away"
+	halfInning string  // "top" | "bottom"
+	inning     int
+	batter     string
+	event      string // result.event (e.g. "Single", "Home Run")
 }
 
 // extractWinProbSeries returns home-team WP percentages oldest-to-newest
@@ -40,11 +43,14 @@ func extractWinProbSeries(plays []api.WinProbPlay) ([]float64, []winProbSwing) {
 				if delta < 0 {
 					team = "away"
 				}
-				event := play.Result.Event
-				if play.Result.Description != "" {
-					event = play.Result.Description
-				}
-				swings = append(swings, winProbSwing{delta: delta, team: team, event: event})
+				swings = append(swings, winProbSwing{
+					delta:      delta,
+					team:       team,
+					halfInning: play.About.HalfInning,
+					inning:     play.About.Inning,
+					batter:     play.Matchup.Batter.FullName,
+					event:      play.Result.Event,
+				})
 			}
 		}
 		prev = play.HomeWinProbability
@@ -127,18 +133,28 @@ func renderWinProbSwings(swings []winProbSwing, awayAbbr, homeAbbr string,
 		return ""
 	}
 
-	// Show most recent N swings, newest first.
-	n := len(swings)
-	if n > winProbMaxSwings {
-		swings = swings[n-winProbMaxSwings:]
+	// Each swing renders as two lines, so cap to fit remaining height.
+	maxSwings := winProbMaxSwings
+	if maxSwings*2+1 > height {
+		maxSwings = (height - 1) / 2
+	}
+	if maxSwings < 1 {
+		return ""
+	}
+	if len(swings) > maxSwings {
+		swings = swings[len(swings)-maxSwings:]
 	}
 
-	headerStyleLocal := lipgloss.NewStyle().
+	sectionStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.AdaptiveColor{Light: "#666666", Dark: "#888888"}).
 		Bold(true)
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#777777", Dark: "#999999"})
+	eventStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#444444", Dark: "#CCCCCC"})
 
 	var lines []string
-	lines = append(lines, headerStyleLocal.Render("Recent swings"))
+	lines = append(lines, sectionStyle.Render("Recent swings"))
 
 	// Walk newest to oldest.
 	for i := len(swings) - 1; i >= 0; i-- {
@@ -150,14 +166,55 @@ func renderWinProbSwings(swings []winProbSwing, awayAbbr, homeAbbr string,
 			colors = awayColors
 		}
 		teamStyle := lipgloss.NewStyle().Foreground(colors.Primary).Bold(true)
-		prefix := fmt.Sprintf("%s +%.0f · ", teamStyle.Render(abbr), math.Abs(sw.delta))
-		// Approximate prefix visible length: abbr (3) + " +N · " ~ 8-9.
-		visiblePrefix := len(abbr) + 7
-		eventLine := truncateOneLine(sw.event, width-visiblePrefix)
-		lines = append(lines, prefix+eventLine)
+
+		top := fmt.Sprintf("%s %s  %s",
+			teamStyle.Render(abbr),
+			lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("+%.0f", math.Abs(sw.delta))),
+			dimStyle.Render(formatHalfInning(sw.halfInning, sw.inning)),
+		)
+
+		eventDesc := shortenSwingEvent(sw.batter, sw.event)
+		bottom := eventStyle.Render(truncateOneLine(eventDesc, width))
+
+		lines = append(lines, top, bottom)
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func formatHalfInning(half string, inning int) string {
+	prefix := "TOP"
+	if strings.EqualFold(half, "bottom") {
+		prefix = "BOT"
+	}
+	return fmt.Sprintf("%s %d", prefix, inning)
+}
+
+// shortenSwingEvent builds the second-line description: batter name +
+// lowercased event ("Shohei Ohtani home run").
+func shortenSwingEvent(batter, event string) string {
+	event = strings.ToLower(strings.TrimSpace(event))
+	// Preserve common acronyms after lowercasing.
+	for _, w := range []string{"dp", "hbp", "rbi"} {
+		event = replaceWord(event, w, strings.ToUpper(w))
+	}
+	if batter == "" {
+		return event
+	}
+	if event == "" {
+		return batter
+	}
+	return batter + " " + event
+}
+
+func replaceWord(s, old, new string) string {
+	parts := strings.Fields(s)
+	for i, p := range parts {
+		if p == old {
+			parts[i] = new
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // truncateOneLine collapses to a single line and ellipsizes if needed.
