@@ -168,6 +168,23 @@ var (
 
 	zoneLabelStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#F8F8F2"})
+
+	// Scouting modal styles
+	modalBorder = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorSecondary).
+			Padding(1, 2)
+
+	modalDim = lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#6272A4"})
+
+	modalSectionHeader = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorSecondary)
+
+	modalErrorText = lipgloss.NewStyle().
+			Foreground(colorError).
+			Bold(true)
 )
 
 // UpdateColors updates all styles with config colors

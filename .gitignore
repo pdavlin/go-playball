@@ -18,8 +18,8 @@ vendor/
 go.work
 
 # Build output
-playball
-go-playball
+/playball
+/go-playball
 dist/
 build/
 

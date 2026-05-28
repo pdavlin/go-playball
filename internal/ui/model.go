@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pdavlin/go-playball/internal/api"
 	"github.com/pdavlin/go-playball/internal/config"
+	"github.com/pdavlin/go-playball/internal/reportcache"
+	"github.com/pdavlin/go-playball/internal/scouting"
 	"github.com/pdavlin/go-playball/internal/ui/anim"
 )
 
@@ -71,6 +73,12 @@ type Model struct {
 	expectedGameID int
 	// If set, launch directly into this game on init
 	initialGameID int
+
+	// Report-modal state. reportModal is non-nil when the overlay is
+	// active. Caches are created lazily on first open of each kind.
+	reportModal   *reportModal
+	scoutingCache *scouting.Cache
+	recapCache    *reportcache.Cache
 }
 
 // Message types for async operations
@@ -178,6 +186,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Modal owns the keyboard while open. ctrl+c still quits.
+		if m.reportModal != nil {
+			if msg.String() == "ctrl+c" {
+				if m.reportModal.cancel != nil {
+					m.reportModal.cancel()
+				}
+				return m, tea.Quit
+			}
+			closeModal, cmd := m.handleReportKey(msg)
+			if closeModal {
+				m.reportModal = nil
+			}
+			return m, cmd
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -385,6 +407,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == ScheduleView {
 			cmds = append(cmds, loadSchedule(m.apiClient, m.scheduleDate))
 		}
+
+	case reportEventMsg:
+		if m.reportModal != nil && m.reportModal.gamePk == msg.gamePk {
+			m.reportModal.applyEvent(msg.ev)
+			if !m.reportModal.streamDone && m.reportModal.nextEvent != nil {
+				cmds = append(cmds, m.reportModal.nextEvent())
+			}
+		}
+
+	case reportClosedMsg:
+		if m.reportModal != nil && m.reportModal.gamePk == msg.gamePk {
+			m.reportModal.streamDone = true
+			if m.reportModal.spinner != nil {
+				m.reportModal.spinner = m.reportModal.spinner.Pause()
+			}
+		}
+	}
+
+	// Keep the modal spinner ticking while open and streaming.
+	if m.reportModal != nil && m.reportModal.spinner != nil {
+		if tickMsg, ok := msg.(anim.SpinnerTickMsg); ok {
+			var cmd tea.Cmd
+			m.reportModal.spinner, cmd = m.reportModal.spinner.Update(tickMsg)
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -423,7 +470,27 @@ func (m Model) View() string {
 		}
 	}
 
-	return fmt.Sprintf("%s\n%s", content, helpBar)
+	rendered := fmt.Sprintf("%s\n%s", content, helpBar)
+
+	if m.reportModal != nil {
+		rendered = m.renderReportModal(rendered)
+	}
+
+	return rendered
+}
+
+// reportHelpEntry returns the help-bar fragment for the current schedule
+// selection ("r: scouting", "r: recap") or "" when no report is
+// available.
+func (m Model) reportHelpEntry() string {
+	if m.selectedGameIdx < 0 || m.selectedGameIdx >= len(m.games) {
+		return ""
+	}
+	_, label, ok := reportKindFor(m.config.ScoutingEnabled(), &m.games[m.selectedGameIdx])
+	if !ok {
+		return ""
+	}
+	return "r: " + label
 }
 
 // renderHelpBar renders the help bar with keyboard shortcuts
@@ -432,6 +499,9 @@ func (m Model) renderHelpBar() string {
 	switch m.view {
 	case ScheduleView:
 		help = "c: schedule | s: standings | hjkl/arrows: navigate | enter: view game | p/n: prev/next day | t: today | q: quit"
+		if entry := m.reportHelpEntry(); entry != "" {
+			help = entry + " | " + help
+		}
 	case StandingsView:
 		help = "c: schedule | s: standings | q: quit"
 	case GameView:
