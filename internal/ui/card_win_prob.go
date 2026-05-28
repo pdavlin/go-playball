@@ -12,7 +12,7 @@ import (
 const (
 	winProbSwingThreshold = 5.0
 	winProbMaxSwings      = 6
-	winProbSparkRows      = 6
+	winProbSparkHalfRows  = 5
 )
 
 type winProbSwing struct {
@@ -82,7 +82,7 @@ func buildWinProbBody(game *api.Game, plays []api.WinProbPlay, height, width int
 	homeAbbr := getTeamAbbreviation(homeName)
 
 	header := renderWinProbHeader(awayAbbr, homeAbbr, awayColors, homeColors, series)
-	spark := renderWinProbSparkline(series, width, height)
+	spark := renderWinProbChart(series, width, height, awayColors, homeColors)
 	swingsList := renderWinProbSwings(swings, awayAbbr, homeAbbr, awayColors, homeColors, width, height)
 
 	parts := []string{header, "", spark}
@@ -108,23 +108,27 @@ func renderWinProbHeader(awayAbbr, homeAbbr string, away, home TeamColors, serie
 	)
 }
 
-func renderWinProbSparkline(series []float64, width, height int) string {
+func renderWinProbChart(series []float64, width, height int,
+	awayColors, homeColors TeamColors) string {
 	sparkW := width
 	if sparkW < 8 {
 		sparkW = 8
 	}
-	rows := winProbSparkRows
-	// Cap to ~half the available height so swings list has room.
-	if rows > height/2 {
-		rows = height / 2
+
+	halfRows := winProbSparkHalfRows
+	// Total chart height is halfRows*2 + 1 axis. Cap to roughly half
+	// the available height so the swings list still fits.
+	maxHalf := (height - 1) / 4
+	if halfRows > maxHalf {
+		halfRows = maxHalf
 	}
-	if rows < 1 {
-		rows = 1
+	if halfRows < 1 {
+		halfRows = 1
 	}
 
-	style := lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Light: "#1F6FEB", Dark: "#58A6FF"})
-	return style.Render(renderSparklineMulti(series, sparkW, rows))
+	axisColor := lipgloss.AdaptiveColor{Light: "#888888", Dark: "#666666"}
+	return renderBipolarSparkline(series, sparkW, halfRows,
+		awayColors.Primary, homeColors.Primary, axisColor)
 }
 
 func renderWinProbSwings(swings []winProbSwing, awayAbbr, homeAbbr string,

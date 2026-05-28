@@ -3,6 +3,8 @@ package ui
 import (
 	"testing"
 	"unicode/utf8"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestRenderSparkline_Empty(t *testing.T) {
@@ -78,6 +80,91 @@ func TestRenderSparkline_Upsample(t *testing.T) {
 	if runes[len(runes)-1] != all[len(all)-1] {
 		t.Fatalf("last rune: want %q, got %q", all[len(all)-1], runes[len(runes)-1])
 	}
+}
+
+func TestRenderBipolarSparkline_Shape(t *testing.T) {
+	// 5 rows above + 1 axis + 5 rows below = 11 lines.
+	out := renderBipolarSparkline(
+		[]float64{50, 50, 50}, 3, 5,
+		lipgloss.Color("#FF0000"),
+		lipgloss.Color("#0000FF"),
+		lipgloss.Color("#888888"),
+	)
+	lines := splitLines(out)
+	if len(lines) != 11 {
+		t.Fatalf("lines: want 11, got %d", len(lines))
+	}
+}
+
+func TestRenderBipolarSparkline_HomeBelow(t *testing.T) {
+	// 100% home WP for all values: bars hit max depth on the below side.
+	out := renderBipolarSparkline(
+		[]float64{100, 100, 100}, 3, 4,
+		lipgloss.Color("#FF0000"),
+		lipgloss.Color("#0000FF"),
+		lipgloss.Color("#888888"),
+	)
+	lines := splitLines(out)
+	// 4 above + axis + 4 below = 9 lines
+	if len(lines) != 9 {
+		t.Fatalf("lines: want 9, got %d", len(lines))
+	}
+	// Above rows should be all space.
+	for i := 0; i < 4; i++ {
+		if containsBlock(lines[i]) {
+			t.Fatalf("above row %d should be empty, got %q", i, lines[i])
+		}
+	}
+	// Below rows should contain full blocks.
+	for i := 5; i < 9; i++ {
+		if !containsBlock(lines[i]) {
+			t.Fatalf("below row %d should have blocks, got %q", i, lines[i])
+		}
+	}
+}
+
+func TestRenderBipolarSparkline_AwayAbove(t *testing.T) {
+	out := renderBipolarSparkline(
+		[]float64{0, 0, 0}, 3, 4,
+		lipgloss.Color("#FF0000"),
+		lipgloss.Color("#0000FF"),
+		lipgloss.Color("#888888"),
+	)
+	lines := splitLines(out)
+	for i := 0; i < 4; i++ {
+		if !containsBlock(lines[i]) {
+			t.Fatalf("above row %d should have blocks, got %q", i, lines[i])
+		}
+	}
+	for i := 5; i < 9; i++ {
+		if containsBlock(lines[i]) {
+			t.Fatalf("below row %d should be empty, got %q", i, lines[i])
+		}
+	}
+}
+
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	out := []string{""}
+	for _, r := range s {
+		if r == '\n' {
+			out = append(out, "")
+		} else {
+			out[len(out)-1] += string(r)
+		}
+	}
+	return out
+}
+
+func containsBlock(s string) bool {
+	for _, r := range s {
+		if r == '█' {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBucketize_ExactSize(t *testing.T) {

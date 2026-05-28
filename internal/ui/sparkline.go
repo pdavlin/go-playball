@@ -1,6 +1,11 @@
 package ui
 
-import "strings"
+import (
+	"math"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 const sparkChars = "▁▂▃▄▅▆▇█"
 
@@ -101,6 +106,68 @@ func renderSparklineMulti(values []float64, width, rows int) string {
 		out[i] = lines[i].String()
 	}
 	return strings.Join(out, "\n")
+}
+
+// renderBipolarSparkline draws a chart with a horizontal axis at 50.
+// Values > 50 (home favored) push downward in `belowColor`; values <
+// 50 (away favored) push upward in `aboveColor`. The bar magnitude is
+// the absolute deviation from 50 on a fixed [0, 50] scale, so a 90-10
+// game looks twice as decisive as a 70-30 game.
+//
+// Each side gets `halfRows` rows. Total chart height = halfRows*2 + 1.
+// Bars are full-block-only for visual symmetry — Unicode lacks a
+// top-anchored partial-fill set.
+func renderBipolarSparkline(values []float64, width, halfRows int,
+	aboveColor, belowColor, axisColor lipgloss.TerminalColor) string {
+	if width <= 0 || halfRows <= 0 || len(values) == 0 {
+		return ""
+	}
+
+	buckets := bucketize(values, width)
+	rowPct := 50.0 / float64(halfRows)
+
+	above := make([][]rune, halfRows)
+	below := make([][]rune, halfRows)
+	for i := range above {
+		above[i] = make([]rune, width)
+		below[i] = make([]rune, width)
+		for j := range above[i] {
+			above[i][j] = ' '
+			below[i][j] = ' '
+		}
+	}
+
+	for col, v := range buckets {
+		delta := v - 50.0
+		cells := int(math.Round(math.Abs(delta) / rowPct))
+		if cells > halfRows {
+			cells = halfRows
+		}
+		switch {
+		case delta > 0:
+			for r := 0; r < cells; r++ {
+				below[r][col] = '█'
+			}
+		case delta < 0:
+			for r := 0; r < cells; r++ {
+				above[r][col] = '█'
+			}
+		}
+	}
+
+	aboveStyle := lipgloss.NewStyle().Foreground(aboveColor)
+	belowStyle := lipgloss.NewStyle().Foreground(belowColor)
+	axStyle := lipgloss.NewStyle().Foreground(axisColor)
+
+	lines := make([]string, 0, halfRows*2+1)
+	for r := halfRows - 1; r >= 0; r-- {
+		lines = append(lines, aboveStyle.Render(string(above[r])))
+	}
+	lines = append(lines, axStyle.Render(strings.Repeat("─", width)))
+	for r := 0; r < halfRows; r++ {
+		lines = append(lines, belowStyle.Render(string(below[r])))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // bucketize resamples `values` into exactly `width` buckets.
