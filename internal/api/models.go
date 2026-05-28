@@ -141,6 +141,14 @@ type PlayEvent struct {
 	Type      string       `json:"type"`
 }
 
+// WinProbPlay is one entry in the /winProbability endpoint. WP fields
+// are not present in feed/live; this is a separate endpoint.
+type WinProbPlay struct {
+	Result             PlayResult `json:"result"`
+	HomeWinProbability float64    `json:"homeTeamWinProbability"`
+	AwayWinProbability float64    `json:"awayTeamWinProbability"`
+}
+
 // PitchCoordinates contains plate-crossing location data
 type PitchCoordinates struct {
 	PX float64 `json:"pX"` // horizontal plate location in feet (0 = center)

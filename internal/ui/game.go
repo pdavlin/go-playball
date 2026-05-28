@@ -111,6 +111,8 @@ func (m Model) handleGameStatusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.liveTab = LiveTabPlays
 	case "2":
 		m.liveTab = LiveTabPitchMix
+	case "3":
+		m.liveTab = LiveTabWinProb
 	case "up", "k":
 		if m.gameScrollOffset > 0 {
 			m.gameScrollOffset--

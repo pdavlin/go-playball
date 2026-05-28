@@ -250,6 +250,30 @@ func (c *Client) fetchGameFull(gameID int) (*Game, []byte, error) {
 	return &game, bodyBytes, nil
 }
 
+// FetchWinProbability retrieves the per-play win probability data
+// from the dedicated /winProbability endpoint. WP fields are not
+// present in feed/live.
+func (c *Client) FetchWinProbability(gameID int) ([]WinProbPlay, error) {
+	url := fmt.Sprintf("%s/api/v1/game/%d/winProbability", baseURL, gameID)
+
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetching winProbability: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var plays []WinProbPlay
+	if err := json.NewDecoder(resp.Body).Decode(&plays); err != nil {
+		return nil, fmt.Errorf("decoding winProbability response: %w", err)
+	}
+	return plays, nil
+}
+
 // FetchStandings retrieves current MLB standings
 func (c *Client) FetchStandings() ([]DivisionStandings, error) {
 	year := time.Now().Year()

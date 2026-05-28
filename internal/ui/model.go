@@ -41,6 +41,7 @@ type LiveTab int
 const (
 	LiveTabPlays LiveTab = iota
 	LiveTabPitchMix
+	LiveTabWinProb
 )
 
 // Model represents the main application state
@@ -71,6 +72,7 @@ type Model struct {
 	gameTimestamp      string
 	gameSubview        GameSubview
 	liveTab            LiveTab
+	winProb            []api.WinProbPlay
 	focusedPanel       int
 	panelScrollOffsets [4]int
 
@@ -126,6 +128,12 @@ type gameTickMsg struct {
 	gameID    int
 	rawJSON   []byte
 	timestamp string
+}
+
+type winProbLoadedMsg struct {
+	gameID int
+	plays  []api.WinProbPlay
+	err    error
 }
 
 // NewModel creates a new application model.
@@ -221,6 +229,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.gameRawJSON = nil
 				m.gameTimestamp = ""
 				m.scoreAnim = nil
+				m.winProb = nil
 				m.loading = true
 				spinnerCmd := m.startSpinner("Loading", colorPrimary, colorAccent)
 				return m, tea.Batch(spinnerCmd, loadSchedule(m.apiClient, m.scheduleDate))
@@ -233,6 +242,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.gameRawJSON = nil
 				m.gameTimestamp = ""
 				m.scoreAnim = nil
+				m.winProb = nil
 				m.wbcStandings = nil
 				m.loading = true
 				spinnerCmd := m.startSpinner("Loading", colorPrimary, colorAccent)
@@ -399,6 +409,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmds = append(cmds, scheduleGameUpdateIncremental(
 				m.currentGame.ID, m.gameRawJSON, m.gameTimestamp, wait))
+			cmds = append(cmds, loadWinProbability(m.apiClient, m.currentGame.ID))
 		}
 
 	case gameTickMsg:
@@ -410,6 +421,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmds = append(cmds, loadGameIncremental(m.apiClient, msg.gameID, msg.rawJSON, msg.timestamp))
 			return m, tea.Batch(cmds...)
+		}
+
+	case winProbLoadedMsg:
+		if msg.gameID == m.expectedGameID && msg.err == nil {
+			m.winProb = msg.plays
 		}
 
 	case tickMsg:
@@ -525,7 +541,7 @@ func (m Model) renderHelpBar() string {
 		case ScoringPlaysSubview:
 			help = "g: game | b: box score | a: all plays | p: scoring | jk: scroll | " + base
 		case GameStatusSubview:
-			help = "1: Plays | 2: Mix | b: box score | a: all plays | p: scoring | jk: scroll | " + base
+			help = "1: Plays | 2: Mix | 3: WinProb | b: box score | a: all plays | p: scoring | jk: scroll | " + base
 		default:
 			help = "jk: scroll | " + base
 		}
@@ -597,6 +613,13 @@ func loadGameIncremental(client *api.Client, gameID int, currentJSON []byte, tim
 			rawJSON:   rawJSON,
 			timestamp: ts,
 		}
+	}
+}
+
+func loadWinProbability(client *api.Client, gameID int) tea.Cmd {
+	return func() tea.Msg {
+		plays, err := client.FetchWinProbability(gameID)
+		return winProbLoadedMsg{gameID: gameID, plays: plays, err: err}
 	}
 }
 
