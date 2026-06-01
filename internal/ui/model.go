@@ -41,6 +41,18 @@ type LiveTab int
 const (
 	LiveTabPlays LiveTab = iota
 	LiveTabPitchMix
+	LiveTabWinProb
+)
+
+// PregameTab represents the active tab in a Preview-state game view.
+type PregameTab int
+
+const (
+	PregameTabOverview PregameTab = iota
+	PregameTabPitchers
+	PregameTabHotBats // Phase 2
+	PregameTabH2H     // Phase 3
+	PregameTabBullpen // Phase 4
 )
 
 // Model represents the main application state
@@ -71,8 +83,15 @@ type Model struct {
 	gameTimestamp      string
 	gameSubview        GameSubview
 	liveTab            LiveTab
+	winProb            []api.WinProbPlay
 	focusedPanel       int
 	panelScrollOffsets [4]int
+
+	// Pregame view state
+	pregameTab     PregameTab
+	pregameData    map[int]*pregameGameData
+	pregameSpinner *anim.Spinner
+	hotBatsWindow  HotBatsWindow
 
 	// Score animation state
 	prevAwayScore int
@@ -128,6 +147,12 @@ type gameTickMsg struct {
 	timestamp string
 }
 
+type winProbLoadedMsg struct {
+	gameID int
+	plays  []api.WinProbPlay
+	err    error
+}
+
 // NewModel creates a new application model.
 // If initialGameID > 0, the TUI launches directly into that game.
 func NewModel(cfg *config.Config, initialGameID int) Model {
@@ -157,6 +182,7 @@ func NewModel(cfg *config.Config, initialGameID int) Model {
 		scheduleDate: time.Now(),
 		games:        []api.Game{},
 		standings:    []api.DivisionStandings{},
+		pregameData:  map[int]*pregameGameData{},
 	}
 
 	if initialGameID > 0 {
@@ -221,6 +247,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.gameRawJSON = nil
 				m.gameTimestamp = ""
 				m.scoreAnim = nil
+				m.winProb = nil
 				m.loading = true
 				spinnerCmd := m.startSpinner("Loading", colorPrimary, colorAccent)
 				return m, tea.Batch(spinnerCmd, loadSchedule(m.apiClient, m.scheduleDate))
@@ -233,6 +260,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.gameRawJSON = nil
 				m.gameTimestamp = ""
 				m.scoreAnim = nil
+				m.winProb = nil
 				m.wbcStandings = nil
 				m.loading = true
 				spinnerCmd := m.startSpinner("Loading", colorPrimary, colorAccent)
@@ -262,6 +290,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.spinner != nil {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		if m.pregameSpinner != nil {
+			var cmd tea.Cmd
+			m.pregameSpinner, cmd = m.pregameSpinner.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 
@@ -331,6 +364,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.gameSubview = GameStatusSubview
 			}
+			m.pregameTab = PregameTabOverview
 			m.focusedPanel = 0
 			m.panelScrollOffsets = [4]int{}
 			m.gameScrollOffset = 0
@@ -384,13 +418,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			// Seed score tracking on initial load
-			if m.currentGame == nil && msg.game.LiveData != nil {
+			isInitialLoad := m.currentGame == nil
+			if isInitialLoad && msg.game.LiveData != nil {
 				m.prevAwayScore = msg.game.LiveData.Linescore.Teams.Away.Runs
 				m.prevHomeScore = msg.game.LiveData.Linescore.Teams.Home.Runs
 			}
 			m.currentGame = msg.game
 			m.gameRawJSON = msg.rawJSON
 			m.gameTimestamp = msg.timestamp
+
+			// On entry into a Preview game, default to the Pitchers
+			// tab and kick off the arsenal + recent-starts fetch so
+			// content appears without an extra keypress.
+			if isInitialLoad && isPreviewGame(m.currentGame) {
+				m.pregameTab = PregameTabPitchers
+				if cmd := m.dispatchPitcherDetail(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
 		}
 		if m.currentGame != nil && isGameLive(m.currentGame) {
 			wait := 10 * time.Second
@@ -399,6 +444,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmds = append(cmds, scheduleGameUpdateIncremental(
 				m.currentGame.ID, m.gameRawJSON, m.gameTimestamp, wait))
+			cmds = append(cmds, loadWinProbability(m.apiClient, m.currentGame.ID))
 		}
 
 	case gameTickMsg:
@@ -410,6 +456,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmds = append(cmds, loadGameIncremental(m.apiClient, msg.gameID, msg.rawJSON, msg.timestamp))
 			return m, tea.Batch(cmds...)
+		}
+
+	case winProbLoadedMsg:
+		if msg.gameID == m.expectedGameID && msg.err == nil {
+			m.winProb = msg.plays
+		}
+
+	case pregameDataLoadedMsg:
+		if m.pregameData == nil {
+			m.pregameData = map[int]*pregameGameData{}
+		}
+		data, ok := m.pregameData[msg.gameID]
+		if !ok {
+			data = &pregameGameData{}
+			m.pregameData[msg.gameID] = data
+		}
+		switch p := msg.payload.(type) {
+		case pitcherDetailPayload:
+			data.pitcherDetail = &p
+		case hotBatsLoadedPayload:
+			if data.hotBats == nil {
+				data.hotBats = &hotBatsPayload{
+					awayByWindow: map[HotBatsWindow]*hotBatsTeamPayload{},
+					homeByWindow: map[HotBatsWindow]*hotBatsTeamPayload{},
+				}
+			}
+			away := p.away
+			home := p.home
+			data.hotBats.awayByWindow[p.window] = &away
+			data.hotBats.homeByWindow[p.window] = &home
+		case h2hPayload:
+			data.h2h = &p
+		case bullpenPayload:
+			data.bullpen = &p
+		}
+		if m.pregameSpinner != nil {
+			m.pregameSpinner = m.pregameSpinner.Pause()
 		}
 
 	case tickMsg:
@@ -525,7 +608,15 @@ func (m Model) renderHelpBar() string {
 		case ScoringPlaysSubview:
 			help = "g: game | b: box score | a: all plays | p: scoring | jk: scroll | " + base
 		case GameStatusSubview:
-			help = "1: Plays | 2: Mix | b: box score | a: all plays | p: scoring | jk: scroll | " + base
+			if isPreviewGame(m.currentGame) {
+				pregameKeys := "hl/← →: tabs"
+				if m.pregameTab == PregameTabHotBats {
+					pregameKeys += " | , .: window"
+				}
+				help = pregameKeys + " | b: box score | a: all plays | p: scoring | " + base
+			} else {
+				help = "1: Plays | 2: Mix | 3: WinProb | b: box score | a: all plays | p: scoring | jk: scroll | " + base
+			}
 		default:
 			help = "jk: scroll | " + base
 		}
@@ -597,6 +688,13 @@ func loadGameIncremental(client *api.Client, gameID int, currentJSON []byte, tim
 			rawJSON:   rawJSON,
 			timestamp: ts,
 		}
+	}
+}
+
+func loadWinProbability(client *api.Client, gameID int) tea.Cmd {
+	return func() tea.Msg {
+		plays, err := client.FetchWinProbability(gameID)
+		return winProbLoadedMsg{gameID: gameID, plays: plays, err: err}
 	}
 }
 

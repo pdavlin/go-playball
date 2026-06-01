@@ -19,6 +19,7 @@ func (m Model) availableLiveTabs() []tabSpec {
 	return []tabSpec{
 		{"1", "Plays", LiveTabPlays},
 		{"2", "Mix", LiveTabPitchMix},
+		{"3", "WinProb", LiveTabWinProb},
 	}
 }
 
@@ -76,6 +77,8 @@ func (m Model) renderLiveRightColumn(game *api.Game, height, width int) string {
 	switch m.liveTab {
 	case LiveTabPitchMix:
 		body = renderPitchMixCard(game, bodyHeight, width)
+	case LiveTabWinProb:
+		body = renderWinProbCard(game, m.winProb, bodyHeight, width)
 	default:
 		body = m.renderPlays(game, bodyHeight, width, false, true)
 	}

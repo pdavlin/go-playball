@@ -46,6 +46,7 @@ func (m Model) handleGameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.gameSubview = GameStatusSubview
 		m.gameScrollOffset = 0
 		m.liveTab = LiveTabPlays
+		m.pregameTab = PregameTabOverview
 		return m, nil
 	}
 
@@ -56,10 +57,148 @@ func (m Model) handleGameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case AllPlaysSubview, ScoringPlaysSubview:
 		return m.handlePlaysKeys(msg)
 	case GameStatusSubview:
+		if isPreviewGame(m.currentGame) {
+			return m.handlePregameKeys(msg)
+		}
 		return m.handleGameStatusKeys(msg)
 	}
 
 	return m, nil
+}
+
+// isPreviewGame reports whether the given game is in Preview state
+// (scheduled but not yet started).
+func isPreviewGame(game *api.Game) bool {
+	if game == nil {
+		return false
+	}
+	state := game.Status.AbstractGameState
+	if state == "" && game.GameData != nil {
+		state = game.GameData.Status.AbstractGameState
+	}
+	return state == "Preview"
+}
+
+// handlePregameKeys handles navigation for a Preview game.
+//   - 1/2 → direct tab selection
+//   - left/h, right/l → cycle through enabled tabs
+//   - , / .         → cycle Hot Bats window (Hot Bats tab only)
+//
+// Tabs 3-4 (H2H, Bullpen) are disabled and skipped by the cycle.
+func (m Model) handlePregameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "1":
+		return m.activatePregameTab(PregameTabPitchers)
+	case "2":
+		return m.activatePregameTab(PregameTabHotBats)
+	case "3":
+		return m.activatePregameTab(PregameTabH2H)
+	case "4":
+		return m.activatePregameTab(PregameTabBullpen)
+	case "left", "h":
+		return m.activatePregameTab(prevEnabledTab(m.pregameTab))
+	case "right", "l":
+		return m.activatePregameTab(nextEnabledTab(m.pregameTab))
+	case ",":
+		if m.pregameTab == PregameTabHotBats {
+			m.hotBatsWindow = prevHotBatsWindow(m.hotBatsWindow)
+			return m, m.dispatchHotBats(m.hotBatsWindow)
+		}
+	case ".":
+		if m.pregameTab == PregameTabHotBats {
+			m.hotBatsWindow = nextHotBatsWindow(m.hotBatsWindow)
+			return m, m.dispatchHotBats(m.hotBatsWindow)
+		}
+	case "up", "k":
+		if m.gameScrollOffset > 0 {
+			m.gameScrollOffset--
+		}
+	case "down", "j":
+		m.gameScrollOffset++
+	case "G":
+		m.gameScrollOffset = 9999
+	}
+	return m, nil
+}
+
+// activatePregameTab switches to the requested tab and kicks off its
+// fetch if needed. No-op when the tab is already active and cached.
+func (m Model) activatePregameTab(tab PregameTab) (tea.Model, tea.Cmd) {
+	m.pregameTab = tab
+	switch tab {
+	case PregameTabPitchers:
+		return m, m.dispatchPitcherDetail()
+	case PregameTabHotBats:
+		return m, m.dispatchHotBats(m.hotBatsWindow)
+	case PregameTabH2H:
+		return m, m.dispatchH2H()
+	case PregameTabBullpen:
+		return m, m.dispatchBullpen()
+	}
+	return m, nil
+}
+
+// prevEnabledTab and nextEnabledTab walk the enabled tabs in the strip,
+// wrapping at the ends. Disabled tabs (Phase 3-4) are skipped.
+func prevEnabledTab(current PregameTab) PregameTab {
+	tabs := enabledPregameTabs()
+	idx := indexOfTab(tabs, current)
+	if idx <= 0 {
+		return tabs[len(tabs)-1]
+	}
+	return tabs[idx-1]
+}
+
+func nextEnabledTab(current PregameTab) PregameTab {
+	tabs := enabledPregameTabs()
+	idx := indexOfTab(tabs, current)
+	if idx < 0 || idx >= len(tabs)-1 {
+		return tabs[0]
+	}
+	return tabs[idx+1]
+}
+
+func enabledPregameTabs() []PregameTab {
+	var out []PregameTab
+	for _, t := range availablePregameTabs() {
+		if t.enabled {
+			out = append(out, t.tab)
+		}
+	}
+	return out
+}
+
+func indexOfTab(tabs []PregameTab, target PregameTab) int {
+	for i, t := range tabs {
+		if t == target {
+			return i
+		}
+	}
+	return -1
+}
+
+// prevHotBatsWindow and nextHotBatsWindow cycle through the three
+// windows, wrapping at the ends.
+func prevHotBatsWindow(w HotBatsWindow) HotBatsWindow {
+	switch w {
+	case HotBatsL15:
+		return HotBatsL7
+	case HotBatsL30:
+		return HotBatsL15
+	default:
+		return HotBatsL30
+	}
+}
+
+func nextHotBatsWindow(w HotBatsWindow) HotBatsWindow {
+	switch w {
+	case HotBatsL7:
+		return HotBatsL15
+	case HotBatsL15:
+		return HotBatsL30
+	default:
+		return HotBatsL7
+	}
 }
 
 // handleBoxScoreKeys handles keys for box score panel navigation
@@ -111,6 +250,8 @@ func (m Model) handleGameStatusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.liveTab = LiveTabPlays
 	case "2":
 		m.liveTab = LiveTabPitchMix
+	case "3":
+		m.liveTab = LiveTabWinProb
 	case "up", "k":
 		if m.gameScrollOffset > 0 {
 			m.gameScrollOffset--
@@ -179,8 +320,61 @@ func (m Model) renderGame() string {
 	return b.String()
 }
 
-// renderPreviewGame renders a preview (upcoming) game in three-column layout
+// renderPreviewGame renders a preview (upcoming) game. The 3-column
+// overview is always visible at the top; the tab strip and tab body
+// render below it.
 func (m Model) renderPreviewGame(game *api.Game) string {
+	if game.GameData == nil {
+		return itemStyle.Render("Game data unavailable")
+	}
+
+	homeColors := GetTeamColors(game.GameData.Teams.Home.Name)
+
+	overviewHeight := pregameOverviewHeight(game)
+	overview := m.renderPregameOverview(game, m.width, overviewHeight)
+	strip := m.renderPregameTabStrip(m.width, homeColors.Primary)
+
+	separator := lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"}).
+		Render(strings.Repeat("─", m.width))
+
+	// Budget remaining height to the tab body. Reserve:
+	//   title(1) + blank(1) + overview + separator(1) + strip(1) + blank(1) + help(1)
+	used := 6 + overviewHeight
+	bodyHeight := m.height - used
+	if bodyHeight < 4 {
+		bodyHeight = 4
+	}
+	body := m.renderPregameTabBody(game, m.width, bodyHeight)
+
+	parts := []string{overview, separator, strip}
+	if body != "" {
+		parts = append(parts, "", body)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// pregameOverviewHeight returns the height the 3-column overview block
+// needs. Currently fixed; bumps the budget when probable pitchers are
+// hydrated (boxscore-driven extra lines).
+func pregameOverviewHeight(game *api.Game) int {
+	// Header(name, record) = 2; pitcher block adds blank+name+W-L+ERA = 4
+	// Center has start time + venue + city (5 max)
+	// Pick the max plus a small breathing margin.
+	h := 5
+	if game.LiveData != nil {
+		if game.GameData.ProbablePitchers.Away.ID != 0 ||
+			game.GameData.ProbablePitchers.Home.ID != 0 {
+			h = 9
+		}
+	}
+	return h
+}
+
+// renderPregameOverview renders the original 3-column preview layout
+// (away column, center game info, home column). width and height are
+// the body budget. Centering uses width.
+func (m Model) renderPregameOverview(game *api.Game, width, height int) string {
 	if game.GameData == nil {
 		return itemStyle.Render("Game data unavailable")
 	}
@@ -294,7 +488,7 @@ func (m Model) renderPreviewGame(game *api.Game) string {
 	}
 
 	// Create three columns
-	colWidth := (m.width - 4) / 3
+	colWidth := (width - 4) / 3
 	if colWidth < 20 {
 		colWidth = 20
 	}
@@ -317,11 +511,11 @@ func (m Model) renderPreviewGame(game *api.Game) string {
 	// Join columns horizontally
 	preview := lipgloss.JoinHorizontal(lipgloss.Top, awayCol, centerCol, homeCol)
 
-	// Center on screen with padding
+	// Center horizontally as a header band; no top margin so the tab
+	// strip below stays close to the overview.
 	centered := lipgloss.NewStyle().
-		Width(m.width).
+		Width(width).
 		Align(lipgloss.Center).
-		MarginTop(5).
 		Render(preview)
 
 	return centered
