@@ -274,6 +274,39 @@ func (c *Client) FetchWinProbability(gameID int) ([]WinProbPlay, error) {
 	return plays, nil
 }
 
+// FetchHeadToHeadSchedule returns the regular-season schedule between
+// two teams for the given season. Only games that have reached an
+// "abstractGameState" of Final are returned; postponed/cancelled games
+// remain in non-Final states and are filtered out.
+func (c *Client) FetchHeadToHeadSchedule(teamID, opponentID, season int) ([]Game, error) {
+	url := fmt.Sprintf("%s/api/v1/schedule?sportId=1&teamId=%d&opponentId=%d&season=%d&gameType=R",
+		baseURL, teamID, opponentID, season)
+
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetching H2H schedule: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("H2H schedule status %d: %s", resp.StatusCode, string(body))
+	}
+	var scheduleResp ScheduleResponse
+	if err := json.NewDecoder(resp.Body).Decode(&scheduleResp); err != nil {
+		return nil, fmt.Errorf("decoding H2H schedule: %w", err)
+	}
+	var out []Game
+	for _, d := range scheduleResp.Dates {
+		for _, g := range d.Games {
+			if g.Status.AbstractGameState != "Final" {
+				continue
+			}
+			out = append(out, g)
+		}
+	}
+	return out, nil
+}
+
 // FetchStandings retrieves current MLB standings
 func (c *Client) FetchStandings() ([]DivisionStandings, error) {
 	year := time.Now().Year()
