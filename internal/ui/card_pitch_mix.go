@@ -15,6 +15,12 @@ type pitchAgg struct {
 	name       string
 	count      int
 	totalSpeed float64
+	maxSpeed   float64
+}
+
+type recentPitch struct {
+	code  string
+	speed float64
 }
 
 // aggregatePitcherMix walks the play-by-play and tallies the named
@@ -45,6 +51,9 @@ func aggregatePitcherMix(game *api.Game, pitcherID int) (total int, rows []pitch
 			total++
 			if ev.PitchData != nil {
 				agg.totalSpeed += ev.PitchData.StartSpeed
+				if ev.PitchData.StartSpeed > agg.maxSpeed {
+					agg.maxSpeed = ev.PitchData.StartSpeed
+				}
 			}
 		}
 	}
@@ -91,6 +100,110 @@ func buildPitchMixBody(game *api.Game, width int) string {
 	}
 
 	b.WriteString(renderPitchMixTable(rows, total))
+
+	recent := collectRecentPitches(game, pitcherID, 12)
+	if len(recent) > 0 {
+		b.WriteString("\n\n")
+		b.WriteString(renderRecentPitches(recent, width))
+	}
+
+	if fastest := fastestPitch(rows); fastest != "" {
+		b.WriteString("\n\n")
+		b.WriteString(fastest)
+	}
+
+	return b.String()
+}
+
+func fastestPitch(rows []pitchAgg) string {
+	var best *pitchAgg
+	for i := range rows {
+		if rows[i].maxSpeed == 0 {
+			continue
+		}
+		if best == nil || rows[i].maxSpeed > best.maxSpeed {
+			best = &rows[i]
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#666666", Dark: "#888888"})
+	valueStyle := lipgloss.NewStyle().Bold(true)
+	return labelStyle.Render("Fastest: ") +
+		valueStyle.Render(fmt.Sprintf("%s %.1f mph", best.name, best.maxSpeed))
+}
+
+// collectRecentPitches walks AllPlays chronologically and returns the
+// last `n` pitches for the given pitcher in chronological order.
+func collectRecentPitches(game *api.Game, pitcherID int, n int) []recentPitch {
+	if game == nil || game.LiveData == nil {
+		return nil
+	}
+	var all []recentPitch
+	for _, play := range game.LiveData.Plays.AllPlays {
+		if play.Matchup.Pitcher.ID != pitcherID {
+			continue
+		}
+		for _, ev := range play.PlayEvents {
+			if !ev.IsPitch || ev.Details.PitchType == nil {
+				continue
+			}
+			code := ev.Details.PitchType.Code
+			if code == "" {
+				continue
+			}
+			speed := 0.0
+			if ev.PitchData != nil {
+				speed = ev.PitchData.StartSpeed
+			}
+			all = append(all, recentPitch{code: code, speed: speed})
+		}
+	}
+	if len(all) > n {
+		all = all[len(all)-n:]
+	}
+	return all
+}
+
+func renderRecentPitches(pitches []recentPitch, width int) string {
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#666666", Dark: "#888888"}).
+		Bold(true)
+	codeStyle := lipgloss.NewStyle().Bold(true)
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#777777", Dark: "#999999"})
+	sep := dimStyle.Render(" · ")
+
+	var b strings.Builder
+	b.WriteString(labelStyle.Render("Recent"))
+	b.WriteString("\n")
+
+	// Greedy wrap; track visible-length so styled text doesn't break it.
+	lineLen := 0
+	for i, p := range pitches {
+		token := p.code
+		if p.speed > 0 {
+			token = fmt.Sprintf("%s %.0f", p.code, p.speed)
+		}
+		styled := codeStyle.Render(token)
+
+		addLen := len(token)
+		if i > 0 {
+			addLen += 3 // " · "
+		}
+		if lineLen+addLen > width && lineLen > 0 {
+			b.WriteString("\n")
+			lineLen = 0
+		}
+		if lineLen > 0 {
+			b.WriteString(sep)
+			lineLen += 3
+		}
+		b.WriteString(styled)
+		lineLen += len(token)
+	}
 	return b.String()
 }
 
@@ -162,13 +275,19 @@ func truncatePitchName(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
+// padToHeight truncates or pads the content to exactly `height` lines.
+// Crucial: card renderers must not overflow their allocated height, or
+// the surrounding layout scrolls the topRow off-screen.
 func padToHeight(content string, height int) string {
 	if height <= 0 {
-		return content
+		return ""
 	}
-	lines := strings.Count(content, "\n") + 1
-	if lines >= height {
-		return content
+	lines := strings.Split(content, "\n")
+	if len(lines) > height {
+		return strings.Join(lines[:height], "\n")
 	}
-	return content + strings.Repeat("\n", height-lines)
+	if len(lines) < height {
+		return content + strings.Repeat("\n", height-len(lines))
+	}
+	return content
 }
