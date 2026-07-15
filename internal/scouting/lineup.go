@@ -18,14 +18,17 @@ type LineupCtx struct {
 	Batters []BatterCtx
 }
 
-// BatterCtx is one batter in the lineup. SeasonLine is nil when the MLB
-// stats fetch failed or the batter has no rostered splits yet.
+// BatterCtx is one batter in the lineup. SeasonLine and Recent are nil
+// when the MLB stats fetch failed or the batter has no rostered splits
+// yet. BatSide is "R", "L", or "S", empty when unknown.
 type BatterCtx struct {
 	PlayerID     int
 	Name         string
 	Position     string
+	BatSide      string
 	BattingOrder int
 	SeasonLine   *api.HittingLine
+	Recent       *api.BatterWindowStats
 }
 
 // gatherLineups extracts the batting orders from the live feed. Returns
@@ -55,6 +58,7 @@ func buildBatters(order []int, boxPlayers map[string]api.BoxscorePlayer, gameDat
 		if gameData != nil {
 			if p, ok := gameData.Players[key]; ok {
 				b.Name = p.FullName
+				b.BatSide = p.BatSide.Code
 			}
 		}
 		if bp, ok := boxPlayers[key]; ok {
