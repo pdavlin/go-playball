@@ -511,18 +511,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case reportClosedMsg:
 		if m.reportModal != nil && m.reportModal.gamePk == msg.gamePk {
+			// Spinner stays running; advanceReveal pauses it once the
+			// reveal cursor catches up with the streamed text.
 			m.reportModal.streamDone = true
-			if m.reportModal.spinner != nil {
-				m.reportModal.spinner = m.reportModal.spinner.Pause()
-			}
 		}
 	}
 
-	// Keep the modal spinner ticking while open and streaming.
+	// Keep the modal spinner ticking while open and streaming. Each
+	// consumed tick also advances the per-character reveal cursor.
 	if m.reportModal != nil && m.reportModal.spinner != nil {
 		if tickMsg, ok := msg.(anim.SpinnerTickMsg); ok {
 			var cmd tea.Cmd
 			m.reportModal.spinner, cmd = m.reportModal.spinner.Update(tickMsg)
+			if cmd != nil {
+				m.reportModal.advanceReveal()
+			}
 			cmds = append(cmds, cmd)
 		}
 	}

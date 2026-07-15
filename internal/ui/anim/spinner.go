@@ -27,7 +27,18 @@ const (
 )
 
 var cyclingChars = []rune("0123456789abcdefABCDEF~!@#$%^&*()+= ")
+var maskGlyphs = []rune("0123456789abcdefABCDEF~!@#$%^&*()+=")
 var ellipsisSteps = []string{".", "..", "...", ""}
+
+// Word-mask tuning: ghost words are runs of minWordRun..maxWordRun glyph
+// cells separated by stable single spaces; each glyph cell re-rolls only
+// every maskChurnPeriod frames (staggered per cell) so the fill reads as
+// text-shaped shimmer rather than full-line noise.
+const (
+	minWordRun      = 3
+	maxWordRun      = 7
+	maskChurnPeriod = 4
+)
 
 // SpinnerTickMsg triggers the next animation frame.
 type SpinnerTickMsg struct{ ID int }
@@ -58,16 +69,24 @@ type Spinner struct {
 
 // NewSpinner creates a spinner with a static gradient.
 func NewSpinner(size int, label string, from, to color.Color) *Spinner {
-	return newSpinner(size, label, from, to, false)
+	return newSpinner(size, label, from, to, false, false)
 }
 
 // NewCyclingSpinner creates a spinner with a shifting gradient that moves
 // through the text each frame, creating the wave/shimmer effect from crush.
 func NewCyclingSpinner(size int, label string, from, to color.Color) *Spinner {
-	return newSpinner(size, label, from, to, true)
+	return newSpinner(size, label, from, to, true, false)
 }
 
-func newSpinner(size int, label string, from, to color.Color, cycleColors bool) *Spinner {
+// NewWordMaskSpinner creates a cycling spinner whose frames are shaped
+// like ghost text: stable word-length runs of slowly churning glyphs
+// separated by fixed spaces. Intended for full-line streaming fills
+// where the animation stands in for text that hasn't arrived yet.
+func NewWordMaskSpinner(size int, label string, from, to color.Color) *Spinner {
+	return newSpinner(size, label, from, to, true, true)
+}
+
+func newSpinner(size int, label string, from, to color.Color, cycleColors, wordMask bool) *Spinner {
 	nextSpinnerID++
 
 	// For cycling colors, generate a wider ramp and shift offset each frame.
@@ -82,57 +101,85 @@ func newSpinner(size int, label string, from, to color.Color, cycleColors bool) 
 		numFrames = prerenderedFrames
 	}
 
-	// Pre-render cycling frames
+	// mask[i] is false for the fixed space cells between ghost words;
+	// churnPeriod controls how many frames each glyph cell holds its
+	// rune. The plain modes use an all-glyph mask churning every frame.
+	churnPeriod := 1
+	pool := cyclingChars
+	mask := make([]bool, size)
+	if wordMask {
+		churnPeriod = maskChurnPeriod
+		pool = maskGlyphs
+		for i := 0; i < size; {
+			run := minWordRun + rand.IntN(maxWordRun-minWordRun+1)
+			for j := 0; j < run && i < size; j++ {
+				mask[i] = true
+				i++
+			}
+			i++ // single space between ghost words
+		}
+	} else {
+		for i := range mask {
+			mask[i] = true
+		}
+	}
+	if numFrames%churnPeriod != 0 {
+		numFrames += churnPeriod - numFrames%churnPeriod
+	}
+	if numFrames < SpinnerFPS {
+		numFrames = SpinnerFPS
+	}
+
+	// Random birth offsets: each position appears at a different frame.
+	// Churn offsets stagger which frame each glyph cell re-rolls on.
+	birthOffsets := make([]int, size)
+	churnOffsets := make([]int, size)
+	for i := range birthOffsets {
+		birthOffsets[i] = rand.IntN(SpinnerFPS)
+		churnOffsets[i] = rand.IntN(churnPeriod)
+	}
+
+	// Pre-render cycling frames and the birth-window frames in one pass
+	// so both share the same glyph churn state.
 	frames := make([]string, numFrames)
+	dotFrames := make([]string, SpinnerFPS)
+	dotColor := lipgloss.AdaptiveColor{Light: "#666666", Dark: "#6272A4"}
+	dot := lipgloss.NewStyle().Foreground(dotColor).Render(".")
+	glyphs := make([]rune, size)
 	offset := 0
 	for f := range frames {
-		var b strings.Builder
+		var b, d strings.Builder
 		for i := 0; i < size; i++ {
-			idx := i + offset
-			if idx >= len(ramp) {
-				idx = idx % len(ramp)
+			if !mask[i] {
+				b.WriteByte(' ')
+				if f < SpinnerFPS {
+					d.WriteByte(' ')
+				}
+				continue
 			}
-			ch := cyclingChars[rand.IntN(len(cyclingChars))]
-			b.WriteString(lipgloss.NewStyle().
+			if f == 0 || (f+churnOffsets[i])%churnPeriod == 0 {
+				glyphs[i] = pool[rand.IntN(len(pool))]
+			}
+			idx := (i + offset) % len(ramp)
+			styled := lipgloss.NewStyle().
 				Foreground(lipgloss.Color(ColorToHex(ramp[idx]))).
-				Render(string(ch)))
+				Render(string(glyphs[i]))
+			b.WriteString(styled)
+			if f < SpinnerFPS {
+				if birthOffsets[i] > f {
+					d.WriteString(dot)
+				} else {
+					d.WriteString(styled)
+				}
+			}
 		}
 		frames[f] = b.String()
+		if f < SpinnerFPS {
+			dotFrames[f] = d.String()
+		}
 		if cycleColors {
 			offset++
 		}
-	}
-
-	// Random birth offsets: each position appears at a different frame
-	birthOffsets := make([]int, size)
-	for i := range birthOffsets {
-		birthOffsets[i] = rand.IntN(SpinnerFPS)
-	}
-
-	// Pre-render birth window frames (0..SpinnerFPS-1)
-	dotFrames := make([]string, SpinnerFPS)
-	dotColor := lipgloss.AdaptiveColor{Light: "#666666", Dark: "#6272A4"}
-	for f := 0; f < SpinnerFPS; f++ {
-		var b strings.Builder
-		rampOffset := 0
-		if cycleColors {
-			rampOffset = f
-		}
-		for i := 0; i < size; i++ {
-			if birthOffsets[i] > f {
-				b.WriteString(lipgloss.NewStyle().Foreground(dotColor).Render("."))
-			} else {
-				idx := i + rampOffset
-				if idx >= len(ramp) {
-					idx = idx % len(ramp)
-				}
-				ch := cyclingChars[rand.IntN(len(cyclingChars))]
-				b.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color(ColorToHex(ramp[idx]))).
-					Render(string(ch)))
-			}
-		}
-		dotFrames[f] = b.String()
 	}
 
 	return &Spinner{
@@ -193,6 +240,34 @@ func (s *Spinner) TrailerView(n int) string {
 	}
 	full := s.frames[s.frameIdx%len(s.frames)]
 	return clampVisible(full, n)
+}
+
+// LineView returns the current frame's cells in columns [start, end).
+// Unlike TrailerView, the slice is anchored to absolute frame columns:
+// as a text prefix grows and start advances, each remaining animated
+// cell keeps its column, so streamed text appears to resolve *through*
+// the animation instead of pushing it forward. Returns an empty string
+// when the range is empty or past the spinner's width.
+func (s *Spinner) LineView(start, end int) string {
+	if len(s.frames) == 0 {
+		return ""
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end > s.size {
+		end = s.size
+	}
+	if start >= end {
+		return ""
+	}
+	var full string
+	if s.frameIdx < SpinnerFPS {
+		full = s.dotFrames[s.frameIdx%len(s.dotFrames)]
+	} else {
+		full = s.frames[s.frameIdx%len(s.frames)]
+	}
+	return ansi.Cut(full, start, end)
 }
 
 // View returns the current spinner frame with animated label.

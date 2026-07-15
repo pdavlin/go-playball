@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -35,6 +36,8 @@ type reportModal struct {
 	matchupLabel string
 	spinner      *anim.Spinner
 	body         strings.Builder
+	bodyRunes    int
+	revealed     int
 	cached       bool
 	cachedAt     time.Time
 	err          error
@@ -160,7 +163,7 @@ func (m *Model) openReportModal(
 
 	awayColors := GetTeamColors(g.Teams.Away.Team.Name)
 	homeColors := GetTeamColors(g.Teams.Home.Team.Name)
-	sp := anim.NewCyclingSpinner(15, spinnerLabel, awayColors.Primary, homeColors.Primary)
+	sp := anim.NewWordMaskSpinner(reportAnimWidth, spinnerLabel, awayColors.Primary, homeColors.Primary)
 	sp, spinnerCmd := sp.Start()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -195,26 +198,55 @@ func (mod *reportModal) applyEvent(ev reportEvent) {
 	switch ev.Kind {
 	case reportEventDelta:
 		mod.body.WriteString(ev.Text)
+		mod.bodyRunes += utf8.RuneCountInString(ev.Text)
 		if ev.Cached {
 			mod.cached = true
 			mod.cachedAt = ev.CachedAt
+			mod.revealed = mod.bodyRunes
 		}
 	case reportEventDone:
+		// The spinner is left running: advanceReveal pauses it once the
+		// reveal cursor catches up with the streamed text.
 		mod.streamDone = true
 		if ev.Cached {
 			mod.cached = true
 			mod.cachedAt = ev.CachedAt
-		}
-		if mod.spinner != nil {
-			mod.spinner = mod.spinner.Pause()
+			mod.revealed = mod.bodyRunes
 		}
 	case reportEventError:
 		mod.streamDone = true
 		mod.err = ev.Err
+		mod.revealed = mod.bodyRunes
 		if mod.spinner != nil {
 			mod.spinner = mod.spinner.Pause()
 		}
 	}
+}
+
+// Reveal pacing: each spinner tick reveals revealMinStep runes plus a
+// fraction of the backlog, so display trails arrival by a beat but
+// catches up quickly after bursts.
+const (
+	revealMinStep    = 2
+	revealCatchupDiv = 8
+)
+
+// advanceReveal moves the per-character reveal cursor toward the number
+// of streamed runes. Called once per consumed spinner tick; pauses the
+// spinner once the stream is done and the cursor has caught up.
+func (mod *reportModal) advanceReveal() {
+	backlog := mod.bodyRunes - mod.revealed
+	if backlog <= 0 {
+		if mod.streamDone && mod.spinner != nil {
+			mod.spinner = mod.spinner.Pause()
+		}
+		return
+	}
+	step := revealMinStep + backlog/revealCatchupDiv
+	if step > backlog {
+		step = backlog
+	}
+	mod.revealed += step
 }
 
 // handleReportKey processes a key while the modal owns the keyboard.
@@ -320,9 +352,10 @@ func (m Model) renderReportHeader(mod *reportModal, width int) string {
 	return modalSectionHeader.Render(title)
 }
 
-// trailerLen is the visual width of the render-ahead spinner block that
-// trails the latest streamed token.
-const trailerLen = 10
+// reportAnimWidth is the pre-rendered width of the streaming animation.
+// It matches the widest possible modal interior (outer 80 minus border
+// and padding); narrower terminals slice a shorter range per render.
+const reportAnimWidth = 76
 
 func (m Model) renderReportBody(mod *reportModal, width, height int) string {
 	if mod.err != nil {
@@ -331,19 +364,22 @@ func (m Model) renderReportBody(mod *reportModal, width, height int) string {
 		return body + "\n\n" + hint
 	}
 	raw := mod.body.String()
-	streaming := !mod.streamDone && !mod.cached
+	animating := mod.spinner != nil && !mod.cached &&
+		(!mod.streamDone || mod.revealed < mod.bodyRunes)
+	if animating {
+		raw = truncateRunes(raw, mod.revealed)
+	}
 
 	if raw == "" {
-		if streaming && mod.spinner != nil {
-			trailer := mod.spinner.TrailerView(trailerLen)
-			return trailer
+		if animating {
+			return mod.spinner.LineView(0, width)
 		}
 		return modalDim.Render("waiting for first token…")
 	}
 
 	rendered := renderReportMarkdown(raw, width)
-	if streaming && mod.spinner != nil {
-		rendered = appendTrailer(rendered, mod.spinner.TrailerView(trailerLen), width)
+	if animating {
+		rendered = fillLineWithAnim(rendered, mod.spinner, width)
 	}
 
 	lines := strings.Split(rendered, "\n")
@@ -360,24 +396,33 @@ func (m Model) renderReportBody(mod *reportModal, width, height int) string {
 	return strings.Join(lines[mod.scrollOffset:end], "\n")
 }
 
-// appendTrailer appends trailer to the last line of rendered if it fits;
-// otherwise wraps the trailer onto a new line.
-func appendTrailer(rendered, trailer string, width int) string {
-	if trailer == "" {
-		return rendered
+// truncateRunes returns the prefix of s holding at most n runes.
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
 	}
+	count := 0
+	for i := range s {
+		if count == n {
+			return s[:i]
+		}
+		count++
+	}
+	return s
+}
+
+// fillLineWithAnim pads the last line of rendered with the spinner's
+// current frame out to width. The fill is sliced at the column where
+// the streamed text ends, so each animated cell holds its column while
+// arriving tokens consume the line from the left.
+func fillLineWithAnim(rendered string, sp *anim.Spinner, width int) string {
 	lines := strings.Split(rendered, "\n")
 	last := lines[len(lines)-1]
-	tw := visibleWidth(trailer)
-	remaining := width - visibleWidth(last)
-	switch {
-	case remaining >= tw+1:
-		lines[len(lines)-1] = last + " " + trailer
-	case remaining >= tw:
-		lines[len(lines)-1] = last + trailer
-	default:
-		lines = append(lines, trailer)
+	fill := sp.LineView(visibleWidth(last), width)
+	if fill == "" {
+		return rendered
 	}
+	lines[len(lines)-1] = last + fill
 	return strings.Join(lines, "\n")
 }
 
