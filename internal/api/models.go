@@ -433,9 +433,17 @@ type DecisionPitcher struct {
 
 // GameDataPlayer contains player metadata from gameData.players
 type GameDataPlayer struct {
-	ID           int    `json:"id"`
-	FullName     string `json:"fullName"`
-	BoxscoreName string `json:"boxscoreName"`
+	ID           int      `json:"id"`
+	FullName     string   `json:"fullName"`
+	BoxscoreName string   `json:"boxscoreName"`
+	PitchHand    HandInfo `json:"pitchHand,omitempty"`
+	BatSide      HandInfo `json:"batSide,omitempty"`
+}
+
+// HandInfo is a batting or throwing side ("R", "L", or "S" for switch).
+type HandInfo struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
 }
 
 // GameData contains pre-game and venue data
@@ -445,8 +453,18 @@ type GameData struct {
 	Status           GameStatus                  `json:"status"`
 	Teams            GameTeams                   `json:"teams"`
 	Venue            Venue                       `json:"venue"`
+	Weather          Weather                     `json:"weather,omitempty"`
 	ProbablePitchers ProbablePitchers            `json:"probablePitchers,omitempty"`
 	Players          map[string]GameDataPlayer   `json:"players,omitempty"`
+}
+
+// Weather contains game-time conditions from the live feed. All fields
+// are empty until MLB publishes a forecast, typically within a few hours
+// of first pitch.
+type Weather struct {
+	Condition string `json:"condition"`
+	Temp      string `json:"temp"`
+	Wind      string `json:"wind"`
 }
 
 // GameInfo contains basic game info
@@ -460,6 +478,7 @@ type GameInfo struct {
 type DatetimeInfo struct {
 	DateTime     time.Time `json:"dateTime"`
 	OriginalDate string    `json:"originalDate"`
+	DayNight     string    `json:"dayNight"`
 	Time         string    `json:"time"`
 	Ampm         string    `json:"ampm"`
 }

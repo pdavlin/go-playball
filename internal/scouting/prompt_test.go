@@ -119,6 +119,101 @@ func TestRenderPrompt_LineupPresentRendersBatters(t *testing.T) {
 	}
 }
 
+func TestRenderPrompt_ConditionsLine(t *testing.T) {
+	ctx := Context{
+		Weather:  api.Weather{Condition: "Partly Cloudy", Temp: "80", Wind: "4 mph, Out To LF"},
+		DayNight: "night",
+	}
+	_, user := RenderPrompt(ctx)
+	if !strings.Contains(user, "Conditions: 80°F, Partly Cloudy, wind 4 mph, Out To LF, night game") {
+		t.Errorf("conditions line missing or malformed:\n%s", user)
+	}
+}
+
+func TestRenderPrompt_ConditionsOmittedWhenEmpty(t *testing.T) {
+	_, user := RenderPrompt(Context{})
+	if strings.Contains(user, "Conditions:") {
+		t.Errorf("Conditions line leaked into prompt with no weather:\n%s", user)
+	}
+}
+
+func TestRenderPrompt_TeamForm(t *testing.T) {
+	ctx := Context{
+		Away: TeamCtx{Name: "X", Record: "50-40", Streak: "W3", LastTen: "7-3",
+			DivisionRank: "2", GamesBack: "1.5"},
+		Home: TeamCtx{Name: "Y", Record: "40-50"},
+	}
+	_, user := RenderPrompt(ctx)
+	if !strings.Contains(user, "form: streak W3, last ten 7-3, division rank 2 (1.5 GB)") {
+		t.Errorf("team form line missing or malformed:\n%s", user)
+	}
+	if strings.Count(user, "form:") != 1 {
+		t.Errorf("form line should be omitted for the team without standings data:\n%s", user)
+	}
+}
+
+func TestRenderPrompt_TeamFormLeaderOmitsGB(t *testing.T) {
+	ctx := Context{
+		Away: TeamCtx{Name: "X", Record: "60-30", DivisionRank: "1", GamesBack: "-"},
+	}
+	_, user := RenderPrompt(ctx)
+	if !strings.Contains(user, "form: division rank 1\n") {
+		t.Errorf("leader form should omit GB when gamesBack is \"-\":\n%s", user)
+	}
+}
+
+func TestRenderPrompt_ProbableHandArsenalAndStarts(t *testing.T) {
+	ctx := Context{
+		Probables: [2]ProbableCtx{
+			{
+				Name:        "Kodai Senga",
+				HandsThrows: "RHP",
+				Arsenal: []api.ArsenalPitch{
+					{Description: "Splitter", UsagePct: 25, AvgVelocity: 84.2},
+					{Description: "Four-Seam Fastball", UsagePct: 40, AvgVelocity: 96.1},
+				},
+				RecentStarts: []api.GameLogStart{
+					{Date: "2026-07-08", OpponentName: "Atlanta Braves",
+						InningsPitched: "6.0", EarnedRuns: 2, Strikeouts: 8, Walks: 1},
+				},
+			},
+			{Name: "TBD placeholder"},
+		},
+	}
+	_, user := RenderPrompt(ctx)
+	if !strings.Contains(user, "Kodai Senga (RHP)") {
+		t.Errorf("missing handedness label:\n%s", user)
+	}
+	if !strings.Contains(user, "arsenal: Four-Seam Fastball 40% (96.1 mph), Splitter 25% (84.2 mph)") {
+		t.Errorf("arsenal missing or not sorted by usage:\n%s", user)
+	}
+	if !strings.Contains(user, "2026-07-08 vs Atlanta Braves: 6.0 IP, 2 ER, 8 K, 1 BB, 0 HR") {
+		t.Errorf("recent start line missing:\n%s", user)
+	}
+}
+
+func TestRenderPrompt_BatterSideAndRecentForm(t *testing.T) {
+	ctx := Context{
+		Lineups: [2]LineupCtx{
+			{Batters: []BatterCtx{
+				{PlayerID: 1, Name: "Juan Soto", Position: "RF", BatSide: "L", BattingOrder: 1,
+					SeasonLine: &api.HittingLine{AVG: ".280", OBP: ".420", OPS: ".950"},
+					Recent:     &api.BatterWindowStats{AVG: ".333", OPS: "1.100", HomeRuns: 3, GamesPlayed: 7}},
+			}},
+			{Batters: []BatterCtx{
+				{PlayerID: 2, Name: "Pete Alonso", Position: "1B", BattingOrder: 1},
+			}},
+		},
+	}
+	_, user := RenderPrompt(ctx)
+	if !strings.Contains(user, "Juan Soto RF (L): AVG .280 / OBP .420 / OPS .950; last 7 games: AVG .333, OPS 1.100, 3 HR") {
+		t.Errorf("batter line missing side or recent form:\n%s", user)
+	}
+	if !strings.Contains(user, "Pete Alonso 1B: stats unavailable") {
+		t.Errorf("no-side no-stats batter line malformed:\n%s", user)
+	}
+}
+
 func TestSystemPrompt_MentionsLineupGuidance(t *testing.T) {
 	system, _ := RenderPrompt(Context{})
 	if !strings.Contains(system, "Lineups") {

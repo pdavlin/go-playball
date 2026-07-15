@@ -19,26 +19,45 @@ type Context struct {
 	GamePk        int
 	GameDateLocal string
 	Venue         string
+	Weather       api.Weather // zero value when no forecast is posted yet
+	DayNight      string      // "day" / "night", "" when unknown
 	Home          TeamCtx
 	Away          TeamCtx
 	Probables     [2]ProbableCtx // [0] = away, [1] = home
 	Lineups       [2]LineupCtx   // [0] = away, [1] = home; zero value = "not posted"
 }
 
-// TeamCtx is one side's structured context.
+// TeamCtx is one side's structured context. The form fields are empty
+// when the standings fetch failed or the team isn't in a division race
+// (spring training, WBC).
 type TeamCtx struct {
 	Name         string
 	Abbreviation string
 	Record       string
+	Streak       string // e.g. "W3"
+	LastTen      string // e.g. "7-3"
+	DivisionRank string // e.g. "2"
+	GamesBack    string // e.g. "1.5" or "-"
 	SeasonHit    *api.HittingLine
 }
 
 // ProbableCtx is one side's probable starter context.
 type ProbableCtx struct {
-	Name       string
-	HandsThrows string
-	SeasonLine *api.PitchingLine
+	Name         string
+	HandsThrows  string // "RHP" / "LHP", "" when unknown
+	SeasonLine   *api.PitchingLine
+	Arsenal      []api.ArsenalPitch
+	RecentStarts []api.GameLogStart
 }
+
+const (
+	// recentStartsLimit is how many of the starter's latest outings go
+	// into the prompt.
+	recentStartsLimit = 3
+	// recentGamesWindow is the rolling-game window for lineup batters'
+	// recent form.
+	recentGamesWindow = 7
+)
 
 // BuildContext gathers everything the prompt needs for one game. It fans
 // out the four extra MLB stat fetches in parallel; any individual failure
@@ -83,13 +102,21 @@ func BuildContext(ctx context.Context, c *api.Client, g *api.Game) (Context, err
 		},
 	}
 
+	if g.GameData != nil {
+		out.Weather = g.GameData.Weather
+		out.DayNight = g.GameData.Datetime.DayNight
+	}
+
 	awayTeamID := awayID.ID
 	homeTeamID := homeID.ID
 	season := seasonYear(g)
 
 	var (
 		awayPitcher, homePitcher *api.PitchingLine
+		awayArsenal, homeArsenal []api.ArsenalPitch
+		awayStarts, homeStarts   []api.GameLogStart
 		awayHit, homeHit         *api.HittingLine
+		awayForm, homeForm       teamForm
 		awayP, homeP             api.ProbablePitcher
 	)
 
@@ -104,32 +131,60 @@ func BuildContext(ctx context.Context, c *api.Client, g *api.Game) (Context, err
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			line, _ := c.FetchPitcherSeasonStats(awayP.ID, season)
-			awayPitcher = line
+			awayPitcher, _ = c.FetchPitcherSeasonStats(awayP.ID, season)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			awayArsenal, _ = c.FetchPitcherArsenal(awayP.ID, season)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			awayStarts, _ = c.FetchPitcherGameLog(awayP.ID, season, recentStartsLimit)
 		}()
 	}
 	if homeP.ID != 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			line, _ := c.FetchPitcherSeasonStats(homeP.ID, season)
-			homePitcher = line
+			homePitcher, _ = c.FetchPitcherSeasonStats(homeP.ID, season)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			homeArsenal, _ = c.FetchPitcherArsenal(homeP.ID, season)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			homeStarts, _ = c.FetchPitcherGameLog(homeP.ID, season, recentStartsLimit)
 		}()
 	}
 	if awayTeamID != 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			line, _ := c.FetchTeamHittingStats(awayTeamID, season)
-			awayHit = line
+			awayHit, _ = c.FetchTeamHittingStats(awayTeamID, season)
 		}()
 	}
 	if homeTeamID != 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			line, _ := c.FetchTeamHittingStats(homeTeamID, season)
-			homeHit = line
+			homeHit, _ = c.FetchTeamHittingStats(homeTeamID, season)
+		}()
+	}
+	if awayTeamID != 0 || homeTeamID != 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recs, err := c.FetchStandings()
+			if err != nil {
+				return
+			}
+			awayForm = teamFormFromStandings(recs, awayTeamID)
+			homeForm = teamFormFromStandings(recs, homeTeamID)
 		}()
 	}
 
@@ -143,12 +198,84 @@ func BuildContext(ctx context.Context, c *api.Client, g *api.Game) (Context, err
 
 	out.Away.SeasonHit = awayHit
 	out.Home.SeasonHit = homeHit
-	out.Probables[0] = ProbableCtx{Name: awayP.FullName, SeasonLine: awayPitcher}
-	out.Probables[1] = ProbableCtx{Name: homeP.FullName, SeasonLine: homePitcher}
+	awayForm.apply(&out.Away)
+	homeForm.apply(&out.Home)
+	out.Probables[0] = ProbableCtx{
+		Name:         awayP.FullName,
+		HandsThrows:  pitcherHand(g, awayP.ID),
+		SeasonLine:   awayPitcher,
+		Arsenal:      awayArsenal,
+		RecentStarts: awayStarts,
+	}
+	out.Probables[1] = ProbableCtx{
+		Name:         homeP.FullName,
+		HandsThrows:  pitcherHand(g, homeP.ID),
+		SeasonLine:   homePitcher,
+		Arsenal:      homeArsenal,
+		RecentStarts: homeStarts,
+	}
 	out.Lineups[0] = awayLineup
 	out.Lineups[1] = homeLineup
 
 	return out, nil
+}
+
+// teamForm is the standings-derived slice of TeamCtx, gathered in one
+// fetch for both sides.
+type teamForm struct {
+	streak, lastTen, divisionRank, gamesBack string
+}
+
+func (f teamForm) apply(t *TeamCtx) {
+	t.Streak = f.streak
+	t.LastTen = f.lastTen
+	t.DivisionRank = f.divisionRank
+	t.GamesBack = f.gamesBack
+}
+
+func teamFormFromStandings(recs []api.DivisionStandings, teamID int) teamForm {
+	if teamID == 0 {
+		return teamForm{}
+	}
+	for _, div := range recs {
+		for _, tr := range div.TeamRecords {
+			if tr.Team.ID != teamID {
+				continue
+			}
+			f := teamForm{
+				streak:       tr.Streak.StreakCode,
+				divisionRank: tr.DivisionRank,
+				gamesBack:    tr.GamesBack,
+			}
+			for _, sr := range tr.LastTenGames.SplitRecords {
+				if sr.Type == "lastTen" {
+					f.lastTen = fmt.Sprintf("%d-%d", sr.Wins, sr.Losses)
+					break
+				}
+			}
+			return f
+		}
+	}
+	return teamForm{}
+}
+
+// pitcherHand maps the live-feed pitchHand code for playerID to the
+// conventional RHP/LHP label, or "" when unknown.
+func pitcherHand(g *api.Game, playerID int) string {
+	if g.GameData == nil || playerID == 0 {
+		return ""
+	}
+	p, ok := g.GameData.Players[fmt.Sprintf("ID%d", playerID)]
+	if !ok {
+		return ""
+	}
+	switch p.PitchHand.Code {
+	case "R":
+		return "RHP"
+	case "L":
+		return "LHP"
+	}
+	return ""
 }
 
 func fetchTopBatters(wg *sync.WaitGroup, c *api.Client, season int, batters []BatterCtx) {
@@ -163,6 +290,12 @@ func fetchTopBatters(wg *sync.WaitGroup, c *api.Client, season int, batters []Ba
 			defer wg.Done()
 			line, _ := c.FetchBatterSeasonStats(batters[i].PlayerID, season)
 			batters[i].SeasonLine = line
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recent, _ := c.FetchHitterLastXGames(batters[i].PlayerID, season, recentGamesWindow)
+			batters[i].Recent = recent
 		}()
 	}
 }

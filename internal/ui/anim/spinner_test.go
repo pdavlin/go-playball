@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestNewSpinner_FrameCount(t *testing.T) {
@@ -119,6 +120,42 @@ func TestSpinner_DotFrameVisibleWidth(t *testing.T) {
 		if w != size {
 			t.Errorf("dot frame %d: expected visible width %d, got %d", i, size, w)
 		}
+	}
+}
+
+func TestSpinner_LineViewWidth(t *testing.T) {
+	s := NewCyclingSpinner(40, "Test", red, blue)
+	s, _ = s.Start()
+	for start := 0; start < 40; start += 7 {
+		got := lipgloss.Width(s.LineView(start, 40))
+		if got != 40-start {
+			t.Errorf("LineView(%d, 40): expected width %d, got %d", start, 40-start, got)
+		}
+	}
+}
+
+func TestSpinner_LineViewColumnAnchored(t *testing.T) {
+	s := NewCyclingSpinner(40, "Test", red, blue)
+	s, _ = s.Start()
+	s.frameIdx = SpinnerFPS // past the birth window, deterministic frame
+	full := ansi.Strip(s.LineView(0, 40))
+	sliced := ansi.Strip(s.LineView(10, 40))
+	if full[10:] != sliced {
+		t.Errorf("LineView(10, 40) = %q, expected column-aligned suffix %q", sliced, full[10:])
+	}
+}
+
+func TestSpinner_LineViewEmptyRanges(t *testing.T) {
+	s := NewCyclingSpinner(20, "Test", red, blue)
+	s, _ = s.Start()
+	if got := s.LineView(20, 20); got != "" {
+		t.Errorf("LineView(20, 20): expected empty, got %q", got)
+	}
+	if got := s.LineView(30, 25); got != "" {
+		t.Errorf("LineView(30, 25): expected empty, got %q", got)
+	}
+	if got := lipgloss.Width(s.LineView(-5, 60)); got != 20 {
+		t.Errorf("LineView(-5, 60): expected clamped width 20, got %d", got)
 	}
 }
 
