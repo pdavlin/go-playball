@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	defaultBaseURL    = "https://api.anthropic.com"
-	anthropicVersion  = "2023-06-01"
-	errBodyReadLimit  = 500
+	defaultBaseURL   = "https://api.anthropic.com"
+	anthropicVersion = "2023-06-01"
+	errBodyReadLimit = 500
 )
 
 // Client is an Anthropic-backed llm.Provider.
@@ -32,8 +32,8 @@ type Client struct {
 }
 
 // New builds a Client from a config.Scouting. apiKey, model, and (optionally)
-// base URL flow through; max_tokens defaults to 1024, temperature to 0.4 when
-// the caller leaves them at zero.
+// base URL flow through; max_tokens defaults to 1024. A zero temperature means
+// "unset" and is omitted from the request rather than defaulted.
 func New(cfg config.Scouting) *Client {
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
@@ -43,16 +43,12 @@ func New(cfg config.Scouting) *Client {
 	if maxTokens <= 0 {
 		maxTokens = 1024
 	}
-	temperature := cfg.Temperature
-	if temperature == 0 {
-		temperature = 0.4
-	}
 	return &Client{
 		apiKey:      cfg.APIKey,
 		model:       cfg.Model,
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		maxTokens:   maxTokens,
-		temperature: temperature,
+		temperature: cfg.Temperature,
 		http:        &http.Client{},
 	}
 }
@@ -63,12 +59,15 @@ type msgPart struct {
 }
 
 type messagesReq struct {
-	Model       string    `json:"model"`
-	System      string    `json:"system,omitempty"`
-	Messages    []msgPart `json:"messages"`
-	MaxTokens   int       `json:"max_tokens"`
-	Temperature float64   `json:"temperature"`
-	Stream      bool      `json:"stream"`
+	Model     string    `json:"model"`
+	System    string    `json:"system,omitempty"`
+	Messages  []msgPart `json:"messages"`
+	MaxTokens int       `json:"max_tokens"`
+	// Temperature is a pointer so an unset value is omitted entirely. Sonnet 5
+	// and the Opus 4.7+ family reject any non-default sampling parameter with
+	// a 400, so sending a default here would break those models.
+	Temperature *float64 `json:"temperature,omitempty"`
+	Stream      bool     `json:"stream"`
 }
 
 // Stream implements llm.Provider.
@@ -87,6 +86,10 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Event,
 	temperature := req.Temperature
 	if temperature == 0 {
 		temperature = c.temperature
+	}
+	var temperaturePtr *float64
+	if temperature != 0 {
+		temperaturePtr = &temperature
 	}
 
 	var system string
@@ -108,7 +111,7 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Event,
 		System:      system,
 		Messages:    parts,
 		MaxTokens:   maxTokens,
-		Temperature: temperature,
+		Temperature: temperaturePtr,
 		Stream:      true,
 	})
 	if err != nil {

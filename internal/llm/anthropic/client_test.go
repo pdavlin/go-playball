@@ -2,7 +2,9 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -157,5 +159,67 @@ func TestStream_ContextCancelCloses(t *testing.T) {
 	case <-closed:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("channel did not close after cancel")
+	}
+}
+
+// captureBody spins up a server that records the raw request body and returns
+// a minimal well-formed stream.
+func captureBody(t *testing.T, got *[]byte) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		*got = b
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+}
+
+func TestStream_OmitsTemperatureWhenUnset(t *testing.T) {
+	var body []byte
+	srv := captureBody(t, &body)
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	ch, err := c.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	collect(t, ch, time.Second)
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if _, present := decoded["temperature"]; present {
+		t.Errorf("temperature must be omitted when unset; body = %s", body)
+	}
+}
+
+func TestStream_SendsTemperatureWhenSet(t *testing.T) {
+	var body []byte
+	srv := captureBody(t, &body)
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	ch, err := c.Stream(context.Background(), llm.Request{
+		Messages:    []llm.Message{{Role: llm.RoleUser, Content: "hi"}},
+		Temperature: 0.7,
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	collect(t, ch, time.Second)
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if got := decoded["temperature"]; got != 0.7 {
+		t.Errorf("temperature = %v, want 0.7; body = %s", got, body)
 	}
 }
