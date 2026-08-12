@@ -45,36 +45,37 @@ const (
 )
 
 // PregameTab represents the active tab in a Preview-state game view.
+// Pitchers is the zero value and the default tab on entry. The 3-column
+// overview always renders above the strip, so it is not a tab.
 type PregameTab int
 
 const (
-	PregameTabOverview PregameTab = iota
-	PregameTabPitchers
-	PregameTabHotBats // Phase 2
-	PregameTabH2H     // Phase 3
-	PregameTabBullpen // Phase 4
+	PregameTabPitchers PregameTab = iota
+	PregameTabHotBats
+	PregameTabH2H
+	PregameTabBullpen
 )
 
 // Model represents the main application state
 type Model struct {
-	view          View
-	width         int
-	height        int
-	config        *config.Config
-	apiClient     *api.Client
-	spinner       *anim.Spinner
-	loading       bool
-	err           error
+	view      View
+	width     int
+	height    int
+	config    *config.Config
+	apiClient *api.Client
+	spinner   *anim.Spinner
+	loading   bool
+	err       error
 
 	// Schedule view state
-	scheduleDate       time.Time
-	games              []api.Game
-	selectedGameIdx    int
+	scheduleDate         time.Time
+	games                []api.Game
+	selectedGameIdx      int
 	scheduleScrollOffset int
 
 	// Standings view state
-	standings        []api.DivisionStandings
-	wbcStandings     []api.WBCPool
+	standings    []api.DivisionStandings
+	wbcStandings []api.WBCPool
 
 	// Game view state
 	currentGame        *api.Game
@@ -364,10 +365,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.gameSubview = GameStatusSubview
 			}
-			m.pregameTab = PregameTabOverview
+			m.pregameTab = PregameTabPitchers
 			m.focusedPanel = 0
 			m.panelScrollOffsets = [4]int{}
 			m.gameScrollOffset = 0
+			if isPreviewGame(msg.game) {
+				if cmd := m.dispatchPitcherDetail(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
 			// Initialize score tracking for incremental updates
 			if msg.game.LiveData != nil {
 				m.prevAwayScore = msg.game.LiveData.Linescore.Teams.Away.Runs
@@ -612,7 +618,7 @@ func (m Model) renderHelpBar() string {
 			help = "g: game | b: box score | a: all plays | p: scoring | jk: scroll | " + base
 		case GameStatusSubview:
 			if isPreviewGame(m.currentGame) {
-				pregameKeys := "hl/← →: tabs"
+				pregameKeys := "1-4/hl: tabs | jk: scroll"
 				if m.pregameTab == PregameTabHotBats {
 					pregameKeys += " | , .: window"
 				}

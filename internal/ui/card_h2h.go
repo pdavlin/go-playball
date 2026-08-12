@@ -14,14 +14,13 @@ func renderH2HCard(
 	game *api.Game,
 	data *pregameGameData,
 	spinner *anim.Spinner,
-	width, height int,
+	width int,
 ) string {
 	if game == nil || game.GameData == nil {
-		return padToHeight(itemStyle.Render("Game data unavailable"), height)
+		return itemStyle.Render("Game data unavailable")
 	}
 
-	const leftGutter = 2
-	usable := width - leftGutter
+	usable := width - pregameLeftGutter
 
 	awayName := game.GameData.Teams.Away.Name
 	homeName := game.GameData.Teams.Home.Name
@@ -42,8 +41,7 @@ func renderH2HCard(
 		body = renderH2HBody(data.h2h, awayAbbr, homeAbbr, awayColors, homeColors, usable)
 	}
 
-	body = lipgloss.NewStyle().PaddingLeft(leftGutter).Render(body)
-	return padToHeight(body, height)
+	return lipgloss.NewStyle().PaddingLeft(pregameLeftGutter).Render(body)
 }
 
 // renderH2HBody renders the full series block once data is loaded.

@@ -43,10 +43,10 @@ func (m Model) handleGameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.gameScrollOffset = 0
 		return m, nil
 	case "g":
+		// Return to game status. The last-active live/pregame tab is
+		// preserved so the view comes back exactly as it was left.
 		m.gameSubview = GameStatusSubview
 		m.gameScrollOffset = 0
-		m.liveTab = LiveTabPlays
-		m.pregameTab = PregameTabOverview
 		return m, nil
 	}
 
@@ -79,12 +79,12 @@ func isPreviewGame(game *api.Game) bool {
 	return state == "Preview"
 }
 
-// handlePregameKeys handles navigation for a Preview game.
-//   - 1/2 → direct tab selection
-//   - left/h, right/l → cycle through enabled tabs
-//   - , / .         → cycle Hot Bats window (Hot Bats tab only)
-//
-// Tabs 3-4 (H2H, Bullpen) are disabled and skipped by the cycle.
+// handlePregameKeys handles navigation for a Preview game. The model is
+// shared across all tabs:
+//   - 1-4 → direct tab selection
+//   - left/h, right/l → cycle tabs, wrapping at the ends
+//   - j/k, G → scroll the tab body (viewport applied at render time)
+//   - , / . → cycle the tab-local option (Hot Bats window today)
 func (m Model) handlePregameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "1":
@@ -102,11 +102,13 @@ func (m Model) handlePregameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ",":
 		if m.pregameTab == PregameTabHotBats {
 			m.hotBatsWindow = prevHotBatsWindow(m.hotBatsWindow)
+			m.gameScrollOffset = 0
 			return m, m.dispatchHotBats(m.hotBatsWindow)
 		}
 	case ".":
 		if m.pregameTab == PregameTabHotBats {
 			m.hotBatsWindow = nextHotBatsWindow(m.hotBatsWindow)
+			m.gameScrollOffset = 0
 			return m, m.dispatchHotBats(m.hotBatsWindow)
 		}
 	case "up", "k":
@@ -121,10 +123,12 @@ func (m Model) handlePregameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// activatePregameTab switches to the requested tab and kicks off its
-// fetch if needed. No-op when the tab is already active and cached.
+// activatePregameTab switches to the requested tab, resets the body
+// scroll, and kicks off the tab's fetch if needed. No-op when the tab
+// is already active and cached.
 func (m Model) activatePregameTab(tab PregameTab) (tea.Model, tea.Cmd) {
 	m.pregameTab = tab
+	m.gameScrollOffset = 0
 	switch tab {
 	case PregameTabPitchers:
 		return m, m.dispatchPitcherDetail()
@@ -138,8 +142,8 @@ func (m Model) activatePregameTab(tab PregameTab) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// prevEnabledTab and nextEnabledTab walk the enabled tabs in the strip,
-// wrapping at the ends. Disabled tabs (Phase 3-4) are skipped.
+// prevEnabledTab and nextEnabledTab walk the tabs in strip order,
+// wrapping at the ends.
 func prevEnabledTab(current PregameTab) PregameTab {
 	tabs := enabledPregameTabs()
 	idx := indexOfTab(tabs, current)
@@ -161,9 +165,7 @@ func nextEnabledTab(current PregameTab) PregameTab {
 func enabledPregameTabs() []PregameTab {
 	var out []PregameTab
 	for _, t := range availablePregameTabs() {
-		if t.enabled {
-			out = append(out, t.tab)
-		}
+		out = append(out, t.tab)
 	}
 	return out
 }
@@ -345,13 +347,10 @@ func (m Model) renderPreviewGame(game *api.Game) string {
 	if bodyHeight < 4 {
 		bodyHeight = 4
 	}
-	body := m.renderPregameTabBody(game, m.width, bodyHeight)
+	body := m.renderPregameTabBody(game, m.width)
+	body = renderPregameViewport(game, body, m.width, bodyHeight, m.gameScrollOffset)
 
-	parts := []string{overview, separator, strip}
-	if body != "" {
-		parts = append(parts, "", body)
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return lipgloss.JoinVertical(lipgloss.Left, overview, separator, strip, "", body)
 }
 
 // pregameOverviewHeight returns the height the 3-column overview block
@@ -766,7 +765,7 @@ func (m Model) renderCompactGameSituation(game *api.Game) string {
 	// Build the 3 lines, padding the left portion so the linescore
 	// aligns above the right (all plays) column.
 	countBasesGap := "               " // 15 spaces between count and bases
-	leftWidth := (m.width-3)/2 + 3       // match left column + divider from renderLiveGameStatus
+	leftWidth := (m.width-3)/2 + 3     // match left column + divider from renderLiveGameStatus
 	padStyle := lipgloss.NewStyle().Width(leftWidth)
 
 	line1Left := inningLine1 + "  " + ballsStr + countBasesGap + basesLine1

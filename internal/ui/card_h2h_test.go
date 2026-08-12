@@ -110,7 +110,7 @@ func TestRenderH2HCardLoadingSkeleton(t *testing.T) {
 			},
 		},
 	}
-	out := renderH2HCard(game, nil, nil, 100, 20)
+	out := renderH2HCard(game, nil, nil, 100)
 	for _, want := range []string{"HOU", "BAL", "Series", "Last meeting", "Runs", "Avg score"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("skeleton missing %q, got: %q", want, out)
@@ -128,7 +128,7 @@ func TestRenderH2HCardNoMeetings(t *testing.T) {
 		},
 	}
 	data := &pregameGameData{h2h: &h2hPayload{loaded: true}}
-	out := renderH2HCard(game, data, nil, 100, 20)
+	out := renderH2HCard(game, data, nil, 100)
 	if !strings.Contains(out, "No prior meetings this season") {
 		t.Errorf("expected no-meetings fallback, got: %q", out)
 	}
@@ -144,7 +144,7 @@ func TestRenderH2HCardErrorFallback(t *testing.T) {
 		},
 	}
 	data := &pregameGameData{h2h: &h2hPayload{loaded: true, err: errors.New("net")}}
-	out := renderH2HCard(game, data, nil, 100, 20)
+	out := renderH2HCard(game, data, nil, 100)
 	if !strings.Contains(out, "Series data unavailable") {
 		t.Errorf("expected error fallback, got: %q", out)
 	}

@@ -9,21 +9,16 @@ import (
 	"github.com/pdavlin/go-playball/internal/ui/anim"
 )
 
-const bullpenSideBySideWidth = 110
-
 // renderBullpenCard renders the Bullpen Workload tab body.
 func renderBullpenCard(
 	game *api.Game,
 	data *pregameGameData,
 	spinner *anim.Spinner,
-	width, height int,
+	width int,
 ) string {
 	if game == nil || game.GameData == nil {
-		return padToHeight(itemStyle.Render("Game data unavailable"), height)
+		return itemStyle.Render("Game data unavailable")
 	}
-
-	const leftGutter = 2
-	usable := width - leftGutter
 
 	awayName := game.GameData.Teams.Away.Name
 	homeName := game.GameData.Teams.Home.Name
@@ -39,30 +34,17 @@ func renderBullpenCard(
 	awayCol := renderBullpenTeam(GetTeamShortName(awayName), awayColors, awayPayload, spinner)
 	homeCol := renderBullpenTeam(GetTeamShortName(homeName), homeColors, homePayload, spinner)
 
-	var body string
-	if usable >= bullpenSideBySideWidth {
-		colWidth := (usable - 4) / 2
-		if colWidth < 40 {
-			colWidth = 40
-		}
-		left := lipgloss.NewStyle().Width(colWidth).Render(awayCol)
-		gap := "  "
-		right := lipgloss.NewStyle().Width(colWidth).Render(homeCol)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
-	} else {
-		body = lipgloss.JoinVertical(lipgloss.Left, awayCol, "", homeCol)
-	}
+	body := renderTwoTeamColumns(awayCol, homeCol, width)
 
 	footer := lipgloss.NewStyle().
+		PaddingLeft(pregameLeftGutter).
 		Foreground(lipgloss.AdaptiveColor{Light: "#666666", Dark: "#888888"}).
 		Render(fmt.Sprintf(
 			"Ready: %d+ days rest  |  Limited: pitched yesterday <%dP  |  Unavail: yesterday %d+P",
 			bullpenRecentDaysWindow+1, bullpenUnavailPitchThreshold, bullpenUnavailPitchThreshold,
 		))
 
-	full := lipgloss.JoinVertical(lipgloss.Left, body, "", footer)
-	full = lipgloss.NewStyle().PaddingLeft(leftGutter).Render(full)
-	return padToHeight(full, height)
+	return lipgloss.JoinVertical(lipgloss.Left, body, "", footer)
 }
 
 // renderBullpenTeam renders one team's section: header + reliever list.
@@ -73,9 +55,7 @@ func renderBullpenTeam(
 	spinner *anim.Spinner,
 ) string {
 	var b strings.Builder
-	nameStyle := lipgloss.NewStyle().Foreground(colors.Primary).Bold(true)
-	b.WriteString(nameStyle.Render(teamName))
-	b.WriteString("\n\n")
+	b.WriteString(renderPregameTeamHeader(teamName, colors))
 
 	switch {
 	case payload == nil || !payload.loaded:

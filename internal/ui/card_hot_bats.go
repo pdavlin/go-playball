@@ -9,10 +9,6 @@ import (
 	"github.com/pdavlin/go-playball/internal/ui/anim"
 )
 
-// hotBatsSideBySideWidth mirrors the pitcher card: two columns above
-// this width, stacked below.
-const hotBatsSideBySideWidth = 110
-
 // hotBatsRowsPerTeam is the number of hitter rows per team table.
 const hotBatsRowsPerTeam = 3
 
@@ -23,44 +19,26 @@ func renderHotBatsCard(
 	data *pregameGameData,
 	window HotBatsWindow,
 	spinner *anim.Spinner,
-	width, height int,
+	width int,
 ) string {
 	if game == nil || game.GameData == nil {
-		return padToHeight(itemStyle.Render("Game data unavailable"), height)
+		return itemStyle.Render("Game data unavailable")
 	}
-
-	header := renderHotBatsHeader(window, width)
 
 	awayName := game.GameData.Teams.Away.Name
 	homeName := game.GameData.Teams.Home.Name
 	awayColors := GetTeamColors(awayName)
 	homeColors := GetTeamColors(homeName)
 
+	header := renderHotBatsHeader(window, width, homeColors.Primary)
+
 	awayPayload, homePayload := pickHotBatsTeams(data, window)
 
 	awayCol := renderHotBatsTeam(GetTeamShortName(awayName), awayColors, awayPayload, spinner)
 	homeCol := renderHotBatsTeam(GetTeamShortName(homeName), homeColors, homePayload, spinner)
 
-	const leftGutter = 2
-	usable := width - leftGutter
-
-	var body string
-	if usable >= hotBatsSideBySideWidth {
-		colWidth := (usable - 4) / 2
-		if colWidth < 36 {
-			colWidth = 36
-		}
-		left := lipgloss.NewStyle().Width(colWidth).Render(awayCol)
-		gap := "  "
-		right := lipgloss.NewStyle().Width(colWidth).Render(homeCol)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
-	} else {
-		body = lipgloss.JoinVertical(lipgloss.Left, awayCol, "", homeCol)
-	}
-	body = lipgloss.NewStyle().PaddingLeft(leftGutter).Render(body)
-
-	full := lipgloss.JoinVertical(lipgloss.Left, header, "", body)
-	return padToHeight(full, height)
+	body := renderTwoTeamColumns(awayCol, homeCol, width)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
 }
 
 // pickHotBatsTeams returns the per-team payload pointers for the active
@@ -74,9 +52,10 @@ func pickHotBatsTeams(data *pregameGameData, window HotBatsWindow) (*hotBatsTeam
 
 // renderHotBatsHeader renders the window chip strip: `[ L7 ]  L15   L30`.
 // The active window is bracketed and bold.
-func renderHotBatsHeader(active HotBatsWindow, width int) string {
-	const leftGutter = 2
-	activeStyle := lipgloss.NewStyle().Bold(true)
+func renderHotBatsHeader(active HotBatsWindow, width int, selectedColor lipgloss.TerminalColor) string {
+	// Active chip matches the tab strip's selected styling so the two
+	// selector rows read as one system.
+	activeStyle := lipgloss.NewStyle().Foreground(selectedColor).Bold(true)
 	inactiveStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#666666"})
 
@@ -90,7 +69,7 @@ func renderHotBatsHeader(active HotBatsWindow, width int) string {
 		}
 	}
 	strip := strings.Join(parts, " ")
-	return lipgloss.NewStyle().PaddingLeft(leftGutter).Width(width).Render(strip)
+	return lipgloss.NewStyle().PaddingLeft(pregameLeftGutter).Width(width).Render(strip)
 }
 
 // renderHotBatsTeam renders one team's section: team name header + the
@@ -102,9 +81,7 @@ func renderHotBatsTeam(
 	spinner *anim.Spinner,
 ) string {
 	var b strings.Builder
-	nameStyle := lipgloss.NewStyle().Foreground(colors.Primary).Bold(true)
-	b.WriteString(nameStyle.Render(teamName))
-	b.WriteString("\n\n")
+	b.WriteString(renderPregameTeamHeader(teamName, colors))
 
 	switch {
 	case payload == nil || !payload.loaded:
