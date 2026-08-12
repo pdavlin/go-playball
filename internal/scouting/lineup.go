@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/pdavlin/go-playball/internal/api"
+	"github.com/pdavlin/go-playball/internal/savant"
 )
 
 // topBatters is the number of lineup slots per side whose season hitting
@@ -20,7 +21,9 @@ type LineupCtx struct {
 
 // BatterCtx is one batter in the lineup. SeasonLine and Recent are nil
 // when the MLB stats fetch failed or the batter has no rostered splits
-// yet. BatSide is "R", "L", or "S", empty when unknown.
+// yet. BatSide is "R", "L", or "S", empty when unknown. XStats holds the
+// batter's Baseball Savant percentile ranks, nil when the Savant fetch
+// failed or the batter is absent from the leaderboard (low sample).
 type BatterCtx struct {
 	PlayerID     int
 	Name         string
@@ -29,6 +32,7 @@ type BatterCtx struct {
 	BattingOrder int
 	SeasonLine   *api.HittingLine
 	Recent       *api.BatterWindowStats
+	XStats       *savant.Percentiles
 }
 
 // gatherLineups extracts the batting orders from the live feed. Returns

@@ -5,7 +5,11 @@ import (
 	"testing"
 
 	"github.com/pdavlin/go-playball/internal/api"
+	"github.com/pdavlin/go-playball/internal/savant"
 )
+
+// ptr is a test helper returning a pointer to an int percentile.
+func ptr(v int) *int { return &v }
 
 func TestRenderPrompt_IncludesSectionInstructions(t *testing.T) {
 	system, _ := RenderPrompt(Context{})
@@ -262,5 +266,103 @@ func TestSystemPrompt_MentionsLineupGuidance(t *testing.T) {
 	system, _ := RenderPrompt(Context{})
 	if !strings.Contains(system, "Lineups") {
 		t.Error("system prompt missing conditional Lineups guidance")
+	}
+}
+
+func TestSystemPrompt_AllowsSavantExpectedStats(t *testing.T) {
+	system, _ := RenderPrompt(Context{})
+	// The blanket prohibition on expected/percentile stats must be gone now
+	// that Savant supplies them.
+	if strings.Contains(system, "or expected/percentile stats") {
+		t.Error("system prompt still carries the blanket expected/percentile prohibition")
+	}
+	// The expected-vs-actual guidance must be present and conditional on a
+	// supplied savant line.
+	if !strings.Contains(system, "savant pct rank") {
+		t.Error("system prompt should key expected-stat use to a supplied savant line")
+	}
+	if !strings.Contains(system, "make the GAP the story") {
+		t.Error("system prompt should instruct making the expected-vs-actual gap the story")
+	}
+	// The grounding rule against inventing a computed gap must survive.
+	if !strings.Contains(system, "Never state a numeric gap the facts do not contain") {
+		t.Error("system prompt should still forbid inventing a computed numeric gap")
+	}
+}
+
+func TestSystemPrompt_StillForbidsInventedExpectedStatsWhenAbsent(t *testing.T) {
+	system, _ := RenderPrompt(Context{})
+	if !strings.Contains(system, "do not cite or estimate them") {
+		t.Error("system prompt should still forbid expected stats where no savant line is supplied")
+	}
+}
+
+func TestRenderPrompt_BatterSavantLine(t *testing.T) {
+	ctx := Context{
+		Lineups: [2]LineupCtx{
+			{Batters: []BatterCtx{
+				{PlayerID: 1, Name: "Colt Keith", Position: "3B", BattingOrder: 1,
+					SeasonLine: &api.HittingLine{AVG: ".270", OBP: ".330", OPS: ".780"},
+					XStats: &savant.Percentiles{
+						XWOBAPct: ptr(59), WOBAPct: ptr(46), XBAPct: ptr(81),
+						HardHitPct: ptr(48), KPct: ptr(66), ChasePct: ptr(81),
+						SprintSpeedPct: ptr(70),
+					}},
+			}},
+			{Batters: []BatterCtx{
+				{PlayerID: 2, Name: "No Savant Guy", Position: "2B", BattingOrder: 1},
+			}},
+		},
+	}
+	_, user := RenderPrompt(ctx)
+	if !strings.Contains(user, "savant pct rank: xwOBA 59, wOBA 46, xBA 81, hard-hit 48, K 66, chase 81, sprint 70") {
+		t.Errorf("batter savant line missing or malformed:\n%s", user)
+	}
+	// The batter with no XStats must not emit a savant line.
+	if strings.Count(user, "savant pct rank") != 1 {
+		t.Errorf("expected exactly one savant line, got:\n%s", user)
+	}
+}
+
+func TestRenderPrompt_BatterSavantNilFieldsDropped(t *testing.T) {
+	ctx := Context{
+		Lineups: [2]LineupCtx{
+			{Batters: []BatterCtx{
+				{PlayerID: 1, Name: "Low Sample", Position: "SS", BattingOrder: 1,
+					XStats: &savant.Percentiles{SprintSpeedPct: ptr(81)}},
+			}},
+			{Batters: []BatterCtx{{PlayerID: 2, Name: "Filler", BattingOrder: 1}}},
+		},
+	}
+	_, user := RenderPrompt(ctx)
+	if !strings.Contains(user, "savant pct rank: sprint 81") {
+		t.Errorf("low-sample batter should show only the populated rank:\n%s", user)
+	}
+	if strings.Contains(user, "xwOBA") {
+		t.Errorf("nil percentile fields should be dropped, not rendered:\n%s", user)
+	}
+}
+
+func TestRenderPrompt_PitcherSavantLine(t *testing.T) {
+	ctx := Context{
+		Probables: [2]ProbableCtx{
+			{
+				Name:        "Ace Starter",
+				HandsThrows: "RHP",
+				SeasonLine:  &api.PitchingLine{Wins: 8, Losses: 4, ERA: "3.80", WHIP: "1.10", K9: "9.0", IP: "120.0"},
+				XStats: &savant.Percentiles{
+					XERAPct: ptr(78), KPct: ptr(70), WhiffPct: ptr(72),
+					ChasePct: ptr(60), FastballVeloPct: ptr(85), BarrelPct: ptr(55),
+				},
+			},
+			{Name: "No Savant"},
+		},
+	}
+	_, user := RenderPrompt(ctx)
+	if !strings.Contains(user, "savant pct rank: xERA 78, K 70, whiff 72, chase 60, fastball velo 85, barrel 55") {
+		t.Errorf("pitcher savant line missing or malformed:\n%s", user)
+	}
+	if strings.Count(user, "savant pct rank") != 1 {
+		t.Errorf("only the starter with XStats should emit a savant line:\n%s", user)
 	}
 }

@@ -524,6 +524,10 @@ func reportKindFor(cfgEnabled bool, g *api.Game) (reportKind, string, bool) {
 	switch state {
 	case "Preview":
 		return reportKindScouting, "scouting", true
+	case "Live":
+		// In-progress games route to the scouting path, which selects its
+		// in-progress tense from the live game state internally.
+		return reportKindScouting, "scouting", true
 	case "Final":
 		return reportKindRecap, "recap", true
 	default:

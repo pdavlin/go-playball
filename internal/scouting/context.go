@@ -6,10 +6,12 @@ package scouting
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/pdavlin/go-playball/internal/api"
+	"github.com/pdavlin/go-playball/internal/savant"
 )
 
 // Context is the structured input to the prompt renderer. Optional fields
@@ -25,6 +27,13 @@ type Context struct {
 	Away          TeamCtx
 	Probables     [2]ProbableCtx // [0] = away, [1] = home
 	Lineups       [2]LineupCtx   // [0] = away, [1] = home; zero value = "not posted"
+
+	// State selects the report tense. The zero value (StatePregame) keeps
+	// the original preview behavior for existing callers and tests.
+	State GameState
+	// Live carries in-game facts and is non-nil only when State ==
+	// StateInProgress. Nil for pregame reports.
+	Live *LiveCtx
 }
 
 // TeamCtx is one side's structured context. The form fields are empty
@@ -41,13 +50,16 @@ type TeamCtx struct {
 	SeasonHit    *api.HittingLine
 }
 
-// ProbableCtx is one side's probable starter context.
+// ProbableCtx is one side's probable starter context. XStats holds the
+// starter's Baseball Savant percentile ranks, nil when the Savant fetch
+// failed or the pitcher is absent from the leaderboard (low sample).
 type ProbableCtx struct {
 	Name         string
 	HandsThrows  string // "RHP" / "LHP", "" when unknown
 	SeasonLine   *api.PitchingLine
 	Arsenal      []api.ArsenalPitch
 	RecentStarts []api.GameLogStart
+	XStats       *savant.Percentiles
 }
 
 const (
@@ -194,6 +206,26 @@ func BuildContext(ctx context.Context, c *api.Client, g *api.Game) (Context, err
 		fetchTopBatters(&wg, c, season, homeLineup.Batters)
 	}
 
+	// Baseball Savant percentile ranks are a best-effort enrichment. The
+	// two leaderboards (one per player type) cover every player, so we
+	// pull each once and join by id after the wait. Any failure leaves the
+	// maps nil, and the join below simply attaches no XStats.
+	var savantBat, savantPit map[string]savant.Percentiles
+	if awayP.ID != 0 || homeP.ID != 0 ||
+		len(awayLineup.Batters) > 0 || len(homeLineup.Batters) > 0 {
+		sc := savant.NewClient("")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			savantPit, _ = sc.Rankings(season, savant.Pitcher)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			savantBat, _ = sc.Rankings(season, savant.Batter)
+		}()
+	}
+
 	wg.Wait()
 
 	out.Away.SeasonHit = awayHit
@@ -206,6 +238,7 @@ func BuildContext(ctx context.Context, c *api.Client, g *api.Game) (Context, err
 		SeasonLine:   awayPitcher,
 		Arsenal:      awayArsenal,
 		RecentStarts: awayStarts,
+		XStats:       lookupSavant(savantPit, awayP.ID),
 	}
 	out.Probables[1] = ProbableCtx{
 		Name:         homeP.FullName,
@@ -213,11 +246,51 @@ func BuildContext(ctx context.Context, c *api.Client, g *api.Game) (Context, err
 		SeasonLine:   homePitcher,
 		Arsenal:      homeArsenal,
 		RecentStarts: homeStarts,
+		XStats:       lookupSavant(savantPit, homeP.ID),
 	}
+	applyBatterSavant(awayLineup.Batters, savantBat)
+	applyBatterSavant(homeLineup.Batters, savantBat)
 	out.Lineups[0] = awayLineup
 	out.Lineups[1] = homeLineup
 
+	// A game already under way gets the in-progress tense plus the live-fact
+	// block, sourced from the same live feed hydrated above. Detection uses
+	// the (possibly hydrated) g so a schedule-view Live game is caught.
+	if isInProgress(g) {
+		out.State = StateInProgress
+		out.Live = buildLiveContext(g)
+	}
+
 	return out, nil
+}
+
+// lookupSavant returns a copy of the percentile entry for an MLBAM id, or
+// nil when the map is absent (fetch failed) or the id is missing (player
+// below Savant's sample threshold).
+func lookupSavant(m map[string]savant.Percentiles, id int) *savant.Percentiles {
+	if m == nil || id == 0 {
+		return nil
+	}
+	if p, ok := m[strconv.Itoa(id)]; ok {
+		return &p
+	}
+	return nil
+}
+
+// applyBatterSavant attaches Savant percentile ranks to the top batters we
+// actually render, mutating the slice in place. Limiting to topBatters
+// keeps the join aligned with the prompt output.
+func applyBatterSavant(batters []BatterCtx, m map[string]savant.Percentiles) {
+	if m == nil {
+		return
+	}
+	limit := topBatters
+	if limit > len(batters) {
+		limit = len(batters)
+	}
+	for i := 0; i < limit; i++ {
+		batters[i].XStats = lookupSavant(m, batters[i].PlayerID)
+	}
 }
 
 // teamForm is the standings-derived slice of TeamCtx, gathered in one
