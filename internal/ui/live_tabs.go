@@ -83,7 +83,9 @@ func (m Model) renderTabStrip(width int, selectedColor lipgloss.TerminalColor) s
 }
 
 // renderLiveRightColumn picks which card to render based on the
-// active LiveTab and prepends a one-line tab strip.
+// active LiveTab and prepends a one-line tab strip. Plays manages its
+// own scrolling viewport; the other cards return natural-height
+// content and share the tab-body viewport with the pregame tabs.
 func (m Model) renderLiveRightColumn(game *api.Game, height, width int) string {
 	strip := m.renderTabStrip(width, pitchingTeamPrimary(game))
 
@@ -95,9 +97,11 @@ func (m Model) renderLiveRightColumn(game *api.Game, height, width int) string {
 	var body string
 	switch m.liveTab {
 	case LiveTabPitchMix:
-		body = renderPitchMixCard(game, bodyHeight, width)
+		body = renderPitchMixCard(game, width)
+		body = renderTabBodyViewport(game, body, width, bodyHeight, m.gameScrollOffset)
 	case LiveTabWinProb:
 		body = renderWinProbCard(game, m.winProb, bodyHeight, width)
+		body = renderTabBodyViewport(game, body, width, bodyHeight, m.gameScrollOffset)
 	default:
 		body = m.renderPlays(game, bodyHeight, width, false, true)
 	}

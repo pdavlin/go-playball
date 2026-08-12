@@ -67,10 +67,10 @@ func aggregatePitcherMix(game *api.Game, pitcherID int) (total int, rows []pitch
 }
 
 // renderPitchMixCard renders the right-column Pitch Mix card showing
-// the current pitcher's repertoire across the game.
-func renderPitchMixCard(game *api.Game, height, width int) string {
-	body := buildPitchMixBody(game, width)
-	return padToHeight(body, height)
+// the current pitcher's repertoire across the game. Returns natural
+// height; the caller fits it via renderTabBodyViewport.
+func renderPitchMixCard(game *api.Game, width int) string {
+	return buildPitchMixBody(game, width)
 }
 
 func buildPitchMixBody(game *api.Game, width int) string {

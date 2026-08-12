@@ -58,9 +58,11 @@ func extractWinProbSeries(plays []api.WinProbPlay) ([]float64, []winProbSwing) {
 	return series, swings
 }
 
+// renderWinProbCard sizes the chart and swings list to the height
+// budget but returns natural-height content; the caller fits it via
+// renderTabBodyViewport.
 func renderWinProbCard(game *api.Game, plays []api.WinProbPlay, height, width int) string {
-	body := buildWinProbBody(game, plays, height, width)
-	return padToHeight(body, height)
+	return buildWinProbBody(game, plays, height, width)
 }
 
 func buildWinProbBody(game *api.Game, plays []api.WinProbPlay, height, width int) string {
