@@ -3,10 +3,12 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/pdavlin/go-playball/internal/api"
 )
 
@@ -253,5 +255,46 @@ func TestLiveTabCycle(t *testing.T) {
 	updated, _ = m.handleGameStatusKeys(testKeyMsg("h"))
 	if got := updated.(Model).liveTab; got != LiveTabWinProb {
 		t.Errorf("h from Plays should wrap to WinProb, got %v", got)
+	}
+}
+
+// stripANSI removes color/style escape sequences so tests can assert
+// on visible column positions.
+func stripANSI(s string) string {
+	return regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(s, "")
+}
+
+func TestUnderlineTabStripAlignment(t *testing.T) {
+	entries := []stripEntry{
+		{label: "Plays", selected: false},
+		{label: "Pitch Mix", selected: true},
+		{label: "Win Prob", selected: false},
+	}
+	out := renderUnderlineTabStrip(entries, 40, lipgloss.Color("#123456"))
+	lines := strings.Split(out, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("strip = %d lines, want 2", len(lines))
+	}
+	labelLine := stripANSI(lines[0])
+	ruleLine := stripANSI(lines[1])
+
+	// Compare rune columns, not byte offsets: the rule line's ─ glyphs
+	// are multi-byte while the label line's padding is ASCII spaces.
+	labelIdx := strings.Index(labelLine, "Pitch Mix")
+	segIdx := strings.Index(ruleLine, "━")
+	if labelIdx < 0 || segIdx < 0 {
+		t.Fatalf("missing label or segment: %q / %q", labelLine, ruleLine)
+	}
+	labelStart := len([]rune(labelLine[:labelIdx]))
+	segStart := len([]rune(ruleLine[:segIdx]))
+	if labelStart != segStart {
+		t.Errorf("underline segment at col %d, label at col %d", segStart, labelStart)
+	}
+	if got := strings.Count(ruleLine, "━"); got != len("Pitch Mix") {
+		t.Errorf("segment width = %d, want %d", got, len("Pitch Mix"))
+	}
+	// The rule runs the full strip width.
+	if got := len([]rune(ruleLine)); got != 40 {
+		t.Errorf("rule width = %d runes, want 40", got)
 	}
 }

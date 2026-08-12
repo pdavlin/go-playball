@@ -9,7 +9,6 @@ import (
 )
 
 type pregameTabSpec struct {
-	key   string
 	label string
 	tab   PregameTab
 }
@@ -25,28 +24,28 @@ const (
 
 // availablePregameTabs returns the tab strip for a Preview-state game.
 // The 3-column overview is always rendered above the strip, so there is
-// no dedicated Overview tab.
+// no dedicated Overview tab. Number keys 1-4 select tabs directly; the
+// help bar documents them.
 func availablePregameTabs() []pregameTabSpec {
 	return []pregameTabSpec{
-		{"1", "Pitchers", PregameTabPitchers},
-		{"2", "Hot Bats", PregameTabHotBats},
-		{"3", "H2H", PregameTabH2H},
-		{"4", "Bullpen", PregameTabBullpen},
+		{"Pitchers", PregameTabPitchers},
+		{"Hot Bats", PregameTabHotBats},
+		{"H2H", PregameTabH2H},
+		{"Bullpen", PregameTabBullpen},
 	}
 }
 
-// renderPregameTabStrip renders the one-line tab strip in the same
-// visual language as the live-game strip.
+// renderPregameTabStrip renders the tab strip in the same visual
+// language as the live-game strip.
 func (m Model) renderPregameTabStrip(width int, selectedColor lipgloss.TerminalColor) string {
 	entries := make([]stripEntry, 0, 4)
 	for _, t := range availablePregameTabs() {
 		entries = append(entries, stripEntry{
-			key:      t.key,
 			label:    t.label,
 			selected: t.tab == m.pregameTab,
 		})
 	}
-	return renderKeyedTabStrip(entries, width, selectedColor)
+	return renderUnderlineTabStrip(entries, width, selectedColor)
 }
 
 // renderPregameTabBody dispatches to the body renderer for the active

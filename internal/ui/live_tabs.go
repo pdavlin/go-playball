@@ -8,18 +8,18 @@ import (
 )
 
 type tabSpec struct {
-	key   string
 	label string
 	tab   LiveTab
 }
 
 // availableLiveTabs returns the tabs visible in the right column.
 // All tabs share the column with Plays, so if Plays fits, they fit.
+// Number keys 1-3 select tabs directly; the help bar documents them.
 func (m Model) availableLiveTabs() []tabSpec {
 	return []tabSpec{
-		{"1", "Plays", LiveTabPlays},
-		{"2", "Mix", LiveTabPitchMix},
-		{"3", "WinProb", LiveTabWinProb},
+		{"Plays", LiveTabPlays},
+		{"Pitch Mix", LiveTabPitchMix},
+		{"Win Prob", LiveTabWinProb},
 	}
 }
 
@@ -37,35 +37,94 @@ func pitchingTeamPrimary(game *api.Game) lipgloss.Color {
 	return home.Primary
 }
 
-// stripEntry is one `[key] Label` cell in a tab strip. Shared by the
-// live and pregame strips so both render identically.
+// stripEntry is one label cell in a tab strip. Shared by the live and
+// pregame strips so both render identically.
 type stripEntry struct {
-	key      string
 	label    string
 	selected bool
 }
 
-// renderKeyedTabStrip renders a one-line tab strip. The selected entry
-// is bold and tinted with selectedColor; unselected entries are dim.
-func renderKeyedTabStrip(entries []stripEntry, width int, selectedColor lipgloss.TerminalColor) string {
+// Tab strip layout constants. The indent matches pregameLeftGutter so
+// strip labels line up with guttered card bodies; the underline rule
+// doubles as the strip-to-body separator in both views.
+const (
+	tabStripIndent = 2
+	tabStripGap    = "   "
+)
+
+// tabStripDimStyle is the shared dim tone for unselected labels and the
+// hairline segments of the underline rule.
+var tabStripDimStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#666666"})
+
+// renderUnderlineTabStrip renders a two-line tab strip: a row of flat
+// labels, then a full-width hairline rule with a heavy, tinted segment
+// under the selected label. The rule separates the strip from the body,
+// so callers should not add their own separator.
+func renderUnderlineTabStrip(entries []stripEntry, width int, selectedColor lipgloss.TerminalColor) string {
 	selectedStyle := lipgloss.NewStyle().
 		Foreground(selectedColor).
 		Bold(true)
-	unselectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#666666"})
 
-	var parts []string
-	for _, e := range entries {
-		label := "[" + e.key + "] " + e.label
-		if e.selected {
-			parts = append(parts, selectedStyle.Render(label))
-		} else {
-			parts = append(parts, unselectedStyle.Render(label))
+	var labels strings.Builder
+	var rule strings.Builder
+	labels.WriteString(strings.Repeat(" ", tabStripIndent))
+	rule.WriteString(tabStripDimStyle.Render(strings.Repeat("─", tabStripIndent)))
+	ruleWidth := tabStripIndent
+
+	for i, e := range entries {
+		if i > 0 {
+			labels.WriteString(tabStripGap)
+			rule.WriteString(tabStripDimStyle.Render(strings.Repeat("─", len(tabStripGap))))
+			ruleWidth += len(tabStripGap)
 		}
+		w := lipgloss.Width(e.label)
+		if e.selected {
+			labels.WriteString(selectedStyle.Render(e.label))
+			rule.WriteString(selectedStyle.Render(strings.Repeat("━", w)))
+		} else {
+			labels.WriteString(tabStripDimStyle.Render(e.label))
+			rule.WriteString(tabStripDimStyle.Render(strings.Repeat("─", w)))
+		}
+		ruleWidth += w
+	}
+	if remaining := width - ruleWidth; remaining > 0 {
+		rule.WriteString(tabStripDimStyle.Render(strings.Repeat("─", remaining)))
 	}
 
-	strip := strings.Join(parts, "  ")
-	return lipgloss.NewStyle().Width(width).Render(strip)
+	labelLine := lipgloss.NewStyle().Width(width).Render(labels.String())
+	return labelLine + "\n" + rule.String()
+}
+
+// renderUnderlineChipRow renders a compact selector in the same
+// underline language as the tab strips, but the rule stops at the last
+// chip instead of running the full width. Used for tab-local options
+// like the Hot Bats window selector.
+func renderUnderlineChipRow(entries []stripEntry, selectedColor lipgloss.TerminalColor) string {
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(selectedColor).
+		Bold(true)
+
+	var labels strings.Builder
+	var rule strings.Builder
+	labels.WriteString(strings.Repeat(" ", tabStripIndent))
+	rule.WriteString(strings.Repeat(" ", tabStripIndent))
+
+	for i, e := range entries {
+		if i > 0 {
+			labels.WriteString(tabStripGap)
+			rule.WriteString(strings.Repeat(" ", len(tabStripGap)))
+		}
+		w := lipgloss.Width(e.label)
+		if e.selected {
+			labels.WriteString(selectedStyle.Render(e.label))
+			rule.WriteString(selectedStyle.Render(strings.Repeat("━", w)))
+		} else {
+			labels.WriteString(tabStripDimStyle.Render(e.label))
+			rule.WriteString(strings.Repeat(" ", w))
+		}
+	}
+	return labels.String() + "\n" + rule.String()
 }
 
 // renderTabStrip renders the live-game tab strip.
@@ -74,12 +133,11 @@ func (m Model) renderTabStrip(width int, selectedColor lipgloss.TerminalColor) s
 	entries := make([]stripEntry, 0, len(tabs))
 	for _, t := range tabs {
 		entries = append(entries, stripEntry{
-			key:      t.key,
 			label:    t.label,
 			selected: t.tab == m.liveTab,
 		})
 	}
-	return renderKeyedTabStrip(entries, width, selectedColor)
+	return renderUnderlineTabStrip(entries, width, selectedColor)
 }
 
 // renderLiveRightColumn picks which card to render based on the
@@ -89,7 +147,8 @@ func (m Model) renderTabStrip(width int, selectedColor lipgloss.TerminalColor) s
 func (m Model) renderLiveRightColumn(game *api.Game, height, width int) string {
 	strip := m.renderTabStrip(width, pitchingTeamPrimary(game))
 
-	bodyHeight := height - 1
+	// The strip is two lines: labels + underline rule.
+	bodyHeight := height - 2
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
