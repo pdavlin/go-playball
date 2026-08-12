@@ -21,6 +21,53 @@ func TestSystemPrompt_HasRequiredHeaders(t *testing.T) {
 	}
 }
 
+func TestSystemPrompt_PastTenseAndNoScoreRestatement(t *testing.T) {
+	system, _ := RenderPrompt(Context{})
+	if !strings.Contains(system, "past tense") {
+		t.Error("recap system prompt should require past tense throughout")
+	}
+	if !strings.Contains(system, "DO NOT restate the score") {
+		t.Error("recap system prompt should tell the model not to restate the score")
+	}
+	if !strings.Contains(system, "do not write a score line") {
+		t.Error("recap system prompt should forbid a score line")
+	}
+}
+
+func TestSystemPrompt_AlignedSectionGuidance(t *testing.T) {
+	system, _ := RenderPrompt(Context{})
+	// Decisive inning + standout hitter, winning pitcher line, and the
+	// standings/series implication must all be reflected in the guidance.
+	for _, phrase := range []string{
+		"winning pitcher's line (IP/H/R/ER/K)",
+		"their game line (H/AB, HR, RBI)",
+		"a move in the standings",
+	} {
+		if !strings.Contains(system, phrase) {
+			t.Errorf("recap system prompt missing aligned guidance %q", phrase)
+		}
+	}
+}
+
+func TestSystemPrompt_GroundingAndVoiceRules(t *testing.T) {
+	system, _ := RenderPrompt(Context{})
+	if !strings.Contains(system, "must appear verbatim") {
+		t.Error("recap system prompt should require numbers verbatim from the facts")
+	}
+	if !strings.Contains(system, "Do not invent a season record") {
+		t.Error("recap system prompt should forbid invented records")
+	}
+	if !strings.Contains(system, "sentence case") {
+		t.Error("recap system prompt should require sentence-case prose")
+	}
+	if !strings.Contains(system, "Avoid hype words") {
+		t.Error("recap system prompt should carry the hype-word avoidance rule")
+	}
+	if !strings.Contains(system, "distinct angle") {
+		t.Error("recap system prompt should require a distinct angle per section")
+	}
+}
+
 func TestRenderPrompt_FinalLineAndDecisions(t *testing.T) {
 	ctx := Context{
 		Away: TeamScore{Name: "Boston Red Sox", Abbreviation: "BOS", Runs: 5, Hits: 9},
