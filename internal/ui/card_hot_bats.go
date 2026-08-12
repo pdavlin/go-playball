@@ -30,7 +30,7 @@ func renderHotBatsCard(
 	awayColors := GetTeamColors(awayName)
 	homeColors := GetTeamColors(homeName)
 
-	header := renderHotBatsHeader(window, width, homeColors.Primary)
+	header := renderHotBatsHeader(window, homeColors.Primary)
 
 	awayPayload, homePayload := pickHotBatsTeams(data, window)
 
@@ -52,24 +52,15 @@ func pickHotBatsTeams(data *pregameGameData, window HotBatsWindow) (*hotBatsTeam
 
 // renderHotBatsHeader renders the window chip strip: `[ L7 ]  L15   L30`.
 // The active window is bracketed and bold.
-func renderHotBatsHeader(active HotBatsWindow, width int, selectedColor lipgloss.TerminalColor) string {
-	// Active chip matches the tab strip's selected styling so the two
-	// selector rows read as one system.
-	activeStyle := lipgloss.NewStyle().Foreground(selectedColor).Bold(true)
-	inactiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#666666"})
-
-	var parts []string
+func renderHotBatsHeader(active HotBatsWindow, selectedColor lipgloss.TerminalColor) string {
+	// The window selector speaks the same underline language as the tab
+	// strips, but its rule stops at the chip row's edge so it reads as a
+	// local control, not a section divider.
+	entries := make([]stripEntry, 0, 3)
 	for _, w := range []HotBatsWindow{HotBatsL7, HotBatsL15, HotBatsL30} {
-		label := w.label()
-		if w == active {
-			parts = append(parts, activeStyle.Render("[ "+label+" ]"))
-		} else {
-			parts = append(parts, inactiveStyle.Render("  "+label+"  "))
-		}
+		entries = append(entries, stripEntry{label: w.label(), selected: w == active})
 	}
-	strip := strings.Join(parts, " ")
-	return lipgloss.NewStyle().PaddingLeft(pregameLeftGutter).Width(width).Render(strip)
+	return renderUnderlineChipRow(entries, selectedColor)
 }
 
 // renderHotBatsTeam renders one team's section: team name header + the

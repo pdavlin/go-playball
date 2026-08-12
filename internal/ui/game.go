@@ -366,14 +366,13 @@ func (m Model) renderPreviewGame(game *api.Game) string {
 
 	overviewHeight := pregameOverviewHeight(game)
 	overview := m.renderPregameOverview(game, m.width, overviewHeight)
+
+	// The strip's underline rule doubles as the overview/body divider,
+	// so no standalone separator is rendered.
 	strip := m.renderPregameTabStrip(m.width, homeColors.Primary)
 
-	separator := lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"}).
-		Render(strings.Repeat("─", m.width))
-
 	// Budget remaining height to the tab body. Reserve:
-	//   title(1) + blank(1) + overview + separator(1) + strip(1) + blank(1) + help(1)
+	//   title(1) + blank(1) + overview + blank(1) + strip(2) + help(1)
 	used := 6 + overviewHeight
 	bodyHeight := m.height - used
 	if bodyHeight < 4 {
@@ -382,7 +381,7 @@ func (m Model) renderPreviewGame(game *api.Game) string {
 	body := m.renderPregameTabBody(game, m.width)
 	body = renderTabBodyViewport(game, body, m.width, bodyHeight, m.gameScrollOffset)
 
-	return lipgloss.JoinVertical(lipgloss.Left, overview, separator, strip, "", body)
+	return lipgloss.JoinVertical(lipgloss.Left, overview, "", strip, body)
 }
 
 // pregameOverviewHeight returns the height the 3-column overview block

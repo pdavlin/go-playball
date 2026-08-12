@@ -113,12 +113,16 @@ func TestRenderHotBatsTeamSkeleton(t *testing.T) {
 }
 
 func TestRenderHotBatsHeader(t *testing.T) {
-	out := renderHotBatsHeader(HotBatsL15, 80, lipgloss.Color("#123456"))
-	// All three labels should appear; active one bracketed.
-	for _, want := range []string{"L7", "L15", "L30", "[ L15 ]"} {
+	out := renderHotBatsHeader(HotBatsL15, lipgloss.Color("#123456"))
+	// All three labels should appear; the active one is marked by a
+	// heavy underline segment on the second line.
+	for _, want := range []string{"L7", "L15", "L30", "━━━"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("header missing %q, got: %q", want, out)
 		}
+	}
+	if got := len(strings.Split(out, "\n")); got != 2 {
+		t.Errorf("chip row = %d lines, want 2", got)
 	}
 }
 
