@@ -37,12 +37,17 @@ func pitchingTeamPrimary(game *api.Game) lipgloss.Color {
 	return home.Primary
 }
 
-// renderTabStrip renders the one-line tab strip. The selected tab is
-// bold and tinted with the pitching team's primary color; unselected
-// tabs are dim.
-func (m Model) renderTabStrip(width int, selectedColor lipgloss.TerminalColor) string {
-	tabs := m.availableLiveTabs()
+// stripEntry is one `[key] Label` cell in a tab strip. Shared by the
+// live and pregame strips so both render identically.
+type stripEntry struct {
+	key      string
+	label    string
+	selected bool
+}
 
+// renderKeyedTabStrip renders a one-line tab strip. The selected entry
+// is bold and tinted with selectedColor; unselected entries are dim.
+func renderKeyedTabStrip(entries []stripEntry, width int, selectedColor lipgloss.TerminalColor) string {
 	selectedStyle := lipgloss.NewStyle().
 		Foreground(selectedColor).
 		Bold(true)
@@ -50,9 +55,9 @@ func (m Model) renderTabStrip(width int, selectedColor lipgloss.TerminalColor) s
 		Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#666666"})
 
 	var parts []string
-	for _, t := range tabs {
-		label := "[" + t.key + "] " + t.label
-		if t.tab == m.liveTab {
+	for _, e := range entries {
+		label := "[" + e.key + "] " + e.label
+		if e.selected {
 			parts = append(parts, selectedStyle.Render(label))
 		} else {
 			parts = append(parts, unselectedStyle.Render(label))
@@ -61,6 +66,20 @@ func (m Model) renderTabStrip(width int, selectedColor lipgloss.TerminalColor) s
 
 	strip := strings.Join(parts, "  ")
 	return lipgloss.NewStyle().Width(width).Render(strip)
+}
+
+// renderTabStrip renders the live-game tab strip.
+func (m Model) renderTabStrip(width int, selectedColor lipgloss.TerminalColor) string {
+	tabs := m.availableLiveTabs()
+	entries := make([]stripEntry, 0, len(tabs))
+	for _, t := range tabs {
+		entries = append(entries, stripEntry{
+			key:      t.key,
+			label:    t.label,
+			selected: t.tab == m.liveTab,
+		})
+	}
+	return renderKeyedTabStrip(entries, width, selectedColor)
 }
 
 // renderLiveRightColumn picks which card to render based on the

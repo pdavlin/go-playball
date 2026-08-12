@@ -2,6 +2,8 @@ package ui
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -44,10 +46,10 @@ func TestEnsurePregameDataReturnsExisting(t *testing.T) {
 	}
 }
 
-func TestPregameTabDefaultsToOverview(t *testing.T) {
+func TestPregameTabDefaultsToPitchers(t *testing.T) {
 	m := Model{}
-	if m.pregameTab != PregameTabOverview {
-		t.Fatalf("default pregame tab = %v, want Overview", m.pregameTab)
+	if m.pregameTab != PregameTabPitchers {
+		t.Fatalf("default pregame tab = %v, want Pitchers", m.pregameTab)
 	}
 }
 
@@ -193,5 +195,43 @@ func TestPitcherDetailPayloadCarriesErrors(t *testing.T) {
 	}
 	if len(p.homeArsenal) != 1 {
 		t.Fatalf("home arsenal len = %d, want 1", len(p.homeArsenal))
+	}
+}
+
+func TestPregameViewportPadsShortContent(t *testing.T) {
+	game := &api.Game{GameData: &api.GameData{}}
+	out := renderPregameViewport(game, "a\nb", 40, 5, 0)
+	if got := len(strings.Split(out, "\n")); got != 5 {
+		t.Fatalf("padded viewport = %d lines, want 5", got)
+	}
+	if !strings.HasPrefix(out, "a\nb") {
+		t.Fatalf("content not preserved: %q", out)
+	}
+}
+
+func TestPregameViewportScrollsOverflow(t *testing.T) {
+	game := &api.Game{GameData: &api.GameData{}}
+	lines := make([]string, 12)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line%d", i)
+	}
+	body := strings.Join(lines, "\n")
+
+	// At the top: no up indicator, first line visible, down indicator present.
+	top := renderPregameViewport(game, body, 40, 5, 0)
+	if !strings.Contains(top, "line0") {
+		t.Errorf("top viewport missing first line: %q", top)
+	}
+	if strings.Contains(top, "line11") {
+		t.Errorf("top viewport should not show last line: %q", top)
+	}
+
+	// Huge offset clamps to the bottom and shows the last line.
+	bottom := renderPregameViewport(game, body, 40, 5, 9999)
+	if !strings.Contains(bottom, "line11") {
+		t.Errorf("bottom viewport missing last line: %q", bottom)
+	}
+	if got := len(strings.Split(bottom, "\n")); got != 5 {
+		t.Errorf("bottom viewport = %d lines, want 5", got)
 	}
 }

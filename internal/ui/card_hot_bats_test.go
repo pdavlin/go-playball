@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/pdavlin/go-playball/internal/api"
 )
 
@@ -24,10 +25,10 @@ func TestHotBatsWindowDefaults(t *testing.T) {
 
 func TestHotBatsWindowMapping(t *testing.T) {
 	cases := []struct {
-		w        HotBatsWindow
-		games    int
-		paMin    int
-		label    string
+		w     HotBatsWindow
+		games int
+		paMin int
+		label string
 	}{
 		{HotBatsL7, 7, 15, "L7"},
 		{HotBatsL15, 15, 35, "L15"},
@@ -112,7 +113,7 @@ func TestRenderHotBatsTeamSkeleton(t *testing.T) {
 }
 
 func TestRenderHotBatsHeader(t *testing.T) {
-	out := renderHotBatsHeader(HotBatsL15, 80)
+	out := renderHotBatsHeader(HotBatsL15, 80, lipgloss.Color("#123456"))
 	// All three labels should appear; active one bracketed.
 	for _, want := range []string{"L7", "L15", "L30", "[ L15 ]"} {
 		if !strings.Contains(out, want) {

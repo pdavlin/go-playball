@@ -58,8 +58,8 @@ type bullpenTeamPayload struct {
 // bullpenReliever pairs a pitcher with their last few appearances and
 // computed status.
 type bullpenReliever struct {
-	name      string
-	status    bullpenStatusKind
+	name        string
+	status      bullpenStatusKind
 	appearances []bullpenAppearance // newest-first, up to bullpenRecentAppearances
 }
 

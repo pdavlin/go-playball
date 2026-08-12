@@ -96,7 +96,7 @@ func TestRenderPitcherDetailCardSkeletonOnLoad(t *testing.T) {
 			},
 		},
 	}
-	out := renderPitcherDetailCard(game, nil, nil, 120, 30)
+	out := renderPitcherDetailCard(game, nil, nil, 120)
 	// The skeleton path should render the table headers + pitcher
 	// names, NOT the old "Loading pitchers..." placeholder.
 	if strings.Contains(out, "Loading pitchers") {
@@ -134,8 +134,8 @@ func TestRenderPitcherDetailCardLayoutSwitch(t *testing.T) {
 		},
 	}
 
-	wide := renderPitcherDetailCard(game, data, nil, 120, 25)
-	narrow := renderPitcherDetailCard(game, data, nil, 80, 25)
+	wide := renderPitcherDetailCard(game, data, nil, 120)
+	narrow := renderPitcherDetailCard(game, data, nil, 80)
 
 	if strings.Count(wide, "Pitcher A") == 0 || strings.Count(wide, "Pitcher B") == 0 {
 		t.Fatalf("wide layout missing pitchers, got: %q", wide)

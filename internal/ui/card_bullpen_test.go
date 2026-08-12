@@ -146,7 +146,7 @@ func TestRenderBullpenCardLoadingPlaceholder(t *testing.T) {
 			},
 		},
 	}
-	out := renderBullpenCard(game, nil, nil, 120, 30)
+	out := renderBullpenCard(game, nil, nil, 120)
 	// GetTeamShortName returns the team's short name; for Houston Astros that's "Astros".
 	for _, want := range []string{"Astros", "Orioles", "Ready:", "Limited:", "Unavail:"} {
 		if !strings.Contains(out, want) {

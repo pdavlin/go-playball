@@ -10,10 +10,6 @@ import (
 	"github.com/pdavlin/go-playball/internal/ui/anim"
 )
 
-// pitcherDetailSideBySideWidth is the minimum total card width at which
-// the two pitcher columns render side-by-side instead of stacked.
-const pitcherDetailSideBySideWidth = 100
-
 // Skeleton row counts while loading. Picked to match a typical starter:
 // most pitchers throw 4-6 distinct pitches and we cap recent starts at 5.
 const (
@@ -24,9 +20,9 @@ const (
 // renderPitcherDetailCard renders the Pitchers tab body. When the fetch
 // is in-flight (data nil or !loaded), it renders the table shape with
 // spinner-filled skeleton cells instead of a single "Loading..." string.
-func renderPitcherDetailCard(game *api.Game, data *pregameGameData, spinner *anim.Spinner, width, height int) string {
+func renderPitcherDetailCard(game *api.Game, data *pregameGameData, spinner *anim.Spinner, width int) string {
 	if game == nil || game.GameData == nil {
-		return padToHeight(itemStyle.Render("Game data unavailable"), height)
+		return itemStyle.Render("Game data unavailable")
 	}
 
 	awayName := game.GameData.Teams.Away.Name
@@ -54,26 +50,7 @@ func renderPitcherDetailCard(game *api.Game, data *pregameGameData, spinner *ani
 		)
 	}
 
-	// leftGutter pushes the away column away from the terminal edge so
-	// the table doesn't read as flush against the border.
-	const leftGutter = 2
-	usable := width - leftGutter
-
-	var body string
-	if usable >= pitcherDetailSideBySideWidth {
-		colWidth := (usable - 4) / 2
-		if colWidth < 30 {
-			colWidth = 30
-		}
-		left := lipgloss.NewStyle().Width(colWidth).Render(awayCol)
-		gap := "  "
-		right := lipgloss.NewStyle().Width(colWidth).Render(homeCol)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
-	} else {
-		body = lipgloss.JoinVertical(lipgloss.Left, awayCol, "", homeCol)
-	}
-	body = lipgloss.NewStyle().PaddingLeft(leftGutter).Render(body)
-	return padToHeight(body, height)
+	return renderTwoTeamColumns(awayCol, homeCol, width)
 }
 
 // renderPitcherColumn renders one pitcher's section: header + arsenal
