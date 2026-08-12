@@ -97,14 +97,20 @@ func runStream(ctx context.Context, resp *http.Response, out chan<- llm.Event, p
 	}
 
 	sawDone := false
+	truncated := false
 	err := llm.ScanSSE(resp.Body, func(ev llm.SSEEvent) bool {
 		decoded, kind := decodeEvent(ev)
+		// finish_reason "length" can arrive on the delta chunk or on a
+		// trailing empty (skipped) chunk; latch it either way.
+		if decoded.Truncated {
+			truncated = true
+		}
 		switch kind {
 		case kindDelta:
 			return emit(decoded)
 		case kindDone:
 			sawDone = true
-			emit(llm.Event{Kind: llm.EventDone})
+			emit(llm.Event{Kind: llm.EventDone, Truncated: truncated})
 			return false
 		}
 		return true
@@ -115,7 +121,7 @@ func runStream(ctx context.Context, resp *http.Response, out chan<- llm.Event, p
 	}
 	// EOF without [DONE]: synthesize a clean completion.
 	if !sawDone && ctx.Err() == nil {
-		emit(llm.Event{Kind: llm.EventDone})
+		emit(llm.Event{Kind: llm.EventDone, Truncated: truncated})
 	}
 }
 

@@ -21,6 +21,10 @@ type chatStreamChunk struct {
 	} `json:"choices"`
 }
 
+// finishReasonLength is the OpenAI finish_reason value emitted when a
+// response was cut off at the max_tokens limit.
+const finishReasonLength = "length"
+
 // decodeKind tells the caller how to react to one decoded SSE event.
 type decodeKind int
 
@@ -58,9 +62,15 @@ func decodeEvent(ev llm.SSEEvent) (llm.Event, decodeKind) {
 	if len(chunk.Choices) == 0 {
 		return llm.Event{}, kindSkip
 	}
-	text := chunk.Choices[0].Delta.Content
+	choice := chunk.Choices[0]
+	// finish_reason "length" means the model hit the output token cap. It
+	// usually rides on the final (empty-content) chunk that precedes the
+	// [DONE] sentinel, so carry it on the Event even for a skipped chunk;
+	// StreamChat latches it onto the terminating EventDone.
+	truncated := choice.FinishReason != nil && *choice.FinishReason == finishReasonLength
+	text := choice.Delta.Content
 	if text == "" {
-		return llm.Event{}, kindSkip
+		return llm.Event{Truncated: truncated}, kindSkip
 	}
-	return llm.Event{Kind: llm.EventDelta, Text: text}, kindDelta
+	return llm.Event{Kind: llm.EventDelta, Text: text, Truncated: truncated}, kindDelta
 }

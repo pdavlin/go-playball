@@ -27,6 +27,10 @@ const (
 	EventError
 )
 
+// truncationMarker is appended to the streamed body when the provider stopped
+// at the output token cap, so the cutoff is visible rather than silent.
+const truncationMarker = " …(truncated: hit max_tokens)"
+
 // Event is what scouting.Generate emits. CachedAt is the generated_at of
 // the entry when Kind == EventDelta from a cache hit; zero otherwise.
 type Event struct {
@@ -106,6 +110,7 @@ func runOrchestration(
 	defer close(out)
 	var body string
 	var sawError bool
+	var truncated bool
 
 	for ev := range stream {
 		switch ev.Kind {
@@ -117,6 +122,17 @@ func runOrchestration(
 			case out <- Event{Kind: EventDelta, Text: ev.Text}:
 			}
 		case llm.EventDone:
+			// A response cut off at the token cap must stay out of the
+			// cache and be flagged to the reader. Emit the marker as a
+			// delta so the existing renderer shows it without any UI change.
+			if ev.Truncated {
+				truncated = true
+				select {
+				case <-ctx.Done():
+					return
+				case out <- Event{Kind: EventDelta, Text: truncationMarker}:
+				}
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -132,7 +148,7 @@ func runOrchestration(
 		}
 	}
 
-	if !sawError && cache != nil && body != "" {
+	if !sawError && !truncated && cache != nil && body != "" {
 		_ = cache.Save(CacheEntry{
 			GamePk:            gamePk,
 			Provider:          cfg.Provider,

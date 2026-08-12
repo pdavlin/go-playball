@@ -15,6 +15,11 @@ import (
 	"github.com/pdavlin/go-playball/internal/llm/oai"
 )
 
+// defaultMaxTokens is the output cap applied when the config leaves
+// max_tokens unset. Kept generous so multi-section reports are not
+// truncated mid-sentence.
+const defaultMaxTokens = 4096
+
 // Client targets {baseURL}/v1/chat/completions. Auth is optional so local
 // servers without keys work without sending an empty Bearer header.
 type Client struct {
@@ -32,7 +37,7 @@ type Client struct {
 func New(cfg config.Scouting) *Client {
 	maxTokens := cfg.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 1024
+		maxTokens = defaultMaxTokens
 	}
 	temperature := cfg.Temperature
 	if temperature == 0 {

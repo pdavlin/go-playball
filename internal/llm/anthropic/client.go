@@ -19,6 +19,10 @@ const (
 	defaultBaseURL   = "https://api.anthropic.com"
 	anthropicVersion = "2023-06-01"
 	errBodyReadLimit = 500
+	// defaultMaxTokens is the output cap applied when the config leaves
+	// max_tokens unset. Multi-section scouting and recap reports overrun a
+	// smaller cap and get truncated mid-sentence, so keep this generous.
+	defaultMaxTokens = 4096
 )
 
 // Client is an Anthropic-backed llm.Provider.
@@ -32,7 +36,7 @@ type Client struct {
 }
 
 // New builds a Client from a config.Scouting. apiKey, model, and (optionally)
-// base URL flow through; max_tokens defaults to 1024. A zero temperature means
+// base URL flow through; max_tokens defaults to 4096. A zero temperature means
 // "unset" and is omitted from the request rather than defaulted.
 func New(cfg config.Scouting) *Client {
 	baseURL := cfg.BaseURL
@@ -41,7 +45,7 @@ func New(cfg config.Scouting) *Client {
 	}
 	maxTokens := cfg.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 1024
+		maxTokens = defaultMaxTokens
 	}
 	return &Client{
 		apiKey:      cfg.APIKey,
@@ -176,8 +180,14 @@ func runStream(ctx context.Context, resp *http.Response, out chan<- llm.Event) {
 		}
 	}
 
+	truncated := false
 	err := llm.ScanSSE(resp.Body, func(ev llm.SSEEvent) bool {
 		decoded, kind, ok := decodeEvent(ev)
+		// message_delta reports stop_reason "max_tokens" before the stream
+		// ends; latch it so the terminating EventDone carries the flag.
+		if decoded.Truncated {
+			truncated = true
+		}
 		if !ok {
 			return true
 		}
@@ -188,6 +198,7 @@ func runStream(ctx context.Context, resp *http.Response, out chan<- llm.Event) {
 			}
 			return emit(decoded)
 		case llm.EventDone:
+			decoded.Truncated = truncated
 			emit(decoded)
 			return false
 		case llm.EventError:

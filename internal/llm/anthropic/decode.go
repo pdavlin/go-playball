@@ -14,6 +14,10 @@ type anthropicEvent struct {
 	Delta struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
+		// StopReason rides on the message_delta event that precedes
+		// message_stop. "max_tokens" means the response was cut off at
+		// the output token cap.
+		StopReason string `json:"stop_reason"`
 	} `json:"delta"`
 	Error struct {
 		Type    string `json:"type"`
@@ -45,6 +49,12 @@ func decodeEvent(ev llm.SSEEvent) (llm.Event, llm.EventKind, bool) {
 	switch t {
 	case "content_block_delta":
 		return llm.Event{Kind: llm.EventDelta, Text: msg.Delta.Text}, llm.EventDelta, true
+	case "message_delta":
+		// Carries the terminal stop_reason but does not end the stream
+		// (message_stop does). Surface truncation via Event.Truncated so
+		// runStream can latch it onto the EventDone; ok=false keeps this
+		// event out of the caller's delta path.
+		return llm.Event{Truncated: msg.Delta.StopReason == "max_tokens"}, 0, false
 	case "message_stop":
 		return llm.Event{Kind: llm.EventDone}, llm.EventDone, true
 	case "error":
@@ -57,7 +67,7 @@ func decodeEvent(ev llm.SSEEvent) (llm.Event, llm.EventKind, bool) {
 			Err:  fmt.Errorf("anthropic: %s", errMsg),
 		}, llm.EventError, true
 	default:
-		// message_start, message_delta, content_block_start/stop, ping
+		// message_start, content_block_start/stop, ping
 		return llm.Event{}, 0, false
 	}
 }
