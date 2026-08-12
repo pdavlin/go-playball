@@ -66,6 +66,19 @@ func (m Model) handleGameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// gameTitle builds the "AWY @ HOM" title line. Schedule-sourced games
+// carry names on game.Teams; games loaded directly by ID only have
+// them on GameData, so fall back there rather than render " @ ".
+func gameTitle(game *api.Game) string {
+	away := game.Teams.Away.Team.Name
+	home := game.Teams.Home.Team.Name
+	if (away == "" || home == "") && game.GameData != nil {
+		away = game.GameData.Teams.Away.Name
+		home = game.GameData.Teams.Home.Name
+	}
+	return fmt.Sprintf("%s @ %s", GetTeamShortName(away), GetTeamShortName(home))
+}
+
 // isPreviewGame reports whether the given game is in Preview state
 // (scheduled but not yet started).
 func isPreviewGame(game *api.Game) bool {
@@ -331,13 +344,11 @@ func (m Model) renderGame() string {
 	// Preview and Live get a title header; Final has the scoreboard instead
 	switch gameState {
 	case "Preview":
-		title := fmt.Sprintf("%s @ %s", GetTeamShortName(game.Teams.Away.Team.Name), GetTeamShortName(game.Teams.Home.Team.Name))
-		b.WriteString(titleStyle.Render(title))
+		b.WriteString(titleStyle.Render(gameTitle(game)))
 		b.WriteString("\n\n")
 		b.WriteString(m.renderPreviewGame(game))
 	case "Live":
-		title := fmt.Sprintf("%s @ %s", GetTeamShortName(game.Teams.Away.Team.Name), GetTeamShortName(game.Teams.Home.Team.Name))
-		b.WriteString(titleStyle.Render(title))
+		b.WriteString(titleStyle.Render(gameTitle(game)))
 		b.WriteString("\n\n")
 		b.WriteString(m.renderLiveGame(game))
 	case "Final":

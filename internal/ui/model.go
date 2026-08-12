@@ -455,11 +455,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case gameTickMsg:
 		if m.view == GameView && msg.gameID == m.expectedGameID {
-			m.loading = true
-			if m.currentGame != nil {
-				away, home := getGameTeamColors(m.currentGame)
-				cmds = append(cmds, m.startSpinner("Updating", away, home))
-			}
+			// Refresh quietly: no loading flag, no Updating spinner.
+			// The spinner prefix lengthened the help bar and could wrap
+			// it to a second line, shifting the whole layout every tick.
 			cmds = append(cmds, loadGameIncremental(m.apiClient, msg.gameID, msg.rawJSON, msg.timestamp))
 			return m, tea.Batch(cmds...)
 		}
@@ -655,7 +653,10 @@ func (m Model) renderHelpBar() string {
 		help = m.spinner.View() + "  " + help
 	}
 
-	return helpStyle.Width(m.width).Render(help)
+	// The help bar is a fixed single line: content that would wrap at
+	// narrow widths is truncated instead, so the bar never changes
+	// height and shifts the layout above it.
+	return helpStyle.Width(m.width).MaxHeight(1).Render(help)
 }
 
 // Command functions for async operations
