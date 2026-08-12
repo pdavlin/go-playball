@@ -18,6 +18,10 @@ const (
 	defaultEndpoint = "https://openrouter.ai/api/v1/chat/completions"
 	httpReferer     = "https://github.com/pdavlin/go-playball"
 	xTitle          = "go-playball"
+	// defaultMaxTokens is the output cap applied when the config leaves
+	// max_tokens unset. Kept generous so multi-section reports are not
+	// truncated mid-sentence.
+	defaultMaxTokens = 4096
 )
 
 // Client is an OpenRouter-backed llm.Provider.
@@ -39,7 +43,7 @@ func New(cfg config.Scouting) *Client {
 	}
 	maxTokens := cfg.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 1024
+		maxTokens = defaultMaxTokens
 	}
 	temperature := cfg.Temperature
 	if temperature == 0 {

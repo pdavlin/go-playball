@@ -49,6 +49,12 @@ type Event struct {
 	Kind EventKind
 	Text string
 	Err  error
+	// Truncated is set on the terminating EventDone when the provider
+	// stopped because it hit the output token cap (OpenAI finish_reason
+	// "length", Anthropic stop_reason "max_tokens") rather than finishing
+	// the message. Callers use it to avoid caching a partial body and to
+	// surface the cutoff to the user.
+	Truncated bool
 }
 
 // Provider is implemented by streaming generation backends.

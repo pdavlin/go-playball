@@ -55,3 +55,24 @@ func TestDecodeEvent_NoData(t *testing.T) {
 		t.Errorf("kind = %v, want kindSkip on empty event", kind)
 	}
 }
+
+func TestDecodeEvent_LengthFinishReasonTruncates(t *testing.T) {
+	// The trailing chunk carries finish_reason "length" with empty content:
+	// it is skipped for text but must flag truncation.
+	ev := llm.SSEEvent{Data: `{"choices":[{"delta":{},"finish_reason":"length"}]}`}
+	got, kind := decodeEvent(ev)
+	if kind != kindSkip {
+		t.Errorf("kind = %v, want kindSkip", kind)
+	}
+	if !got.Truncated {
+		t.Error("finish_reason length should set Truncated")
+	}
+}
+
+func TestDecodeEvent_StopFinishReasonNotTruncated(t *testing.T) {
+	ev := llm.SSEEvent{Data: `{"choices":[{"delta":{},"finish_reason":"stop"}]}`}
+	got, _ := decodeEvent(ev)
+	if got.Truncated {
+		t.Error("finish_reason stop must not set Truncated")
+	}
+}

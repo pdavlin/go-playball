@@ -69,6 +69,34 @@ func TestGetKey_ScoutingAPIKeyMasked(t *testing.T) {
 	}
 }
 
+func TestFillDefaults_ScoutingMaxTokens(t *testing.T) {
+	cases := []struct {
+		name string
+		in   *Scouting
+		want int // expected MaxTokens after fillDefaults; -1 means Scouting must stay nil
+	}{
+		{"nil stays nil", nil, -1},
+		{"unset gets default", &Scouting{Provider: "anthropic"}, DefaultScoutingMaxTokens},
+		{"explicit preserved", &Scouting{Provider: "anthropic", MaxTokens: 512}, 512},
+	}
+	for _, tc := range cases {
+		c := &Config{Scouting: tc.in}
+		c.fillDefaults()
+		if tc.want == -1 {
+			if c.Scouting != nil {
+				t.Errorf("%s: Scouting should stay nil, got %+v", tc.name, c.Scouting)
+			}
+			continue
+		}
+		if c.Scouting == nil {
+			t.Fatalf("%s: Scouting unexpectedly nil", tc.name)
+		}
+		if c.Scouting.MaxTokens != tc.want {
+			t.Errorf("%s: MaxTokens = %d, want %d", tc.name, c.Scouting.MaxTokens, tc.want)
+		}
+	}
+}
+
 func TestGetKey_ScoutingAPIKeyEmpty(t *testing.T) {
 	c := &Config{}
 	got, err := c.GetKey("scouting.api_key")

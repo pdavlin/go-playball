@@ -21,6 +21,14 @@ type Config struct {
 	Scouting               *Scouting        `json:"scouting,omitempty"`
 }
 
+// DefaultScoutingMaxTokens is the output token cap applied to scouting and
+// recap requests when the user leaves scouting.max_tokens unset. Multi-section
+// reports overrun a smaller cap and truncate mid-sentence, so this default is
+// deliberately generous. It is only applied to a Scouting block that already
+// exists; a never-configured (nil) block stays nil so legacy configs and the
+// omitempty marshaling round-trip unchanged.
+const DefaultScoutingMaxTokens = 4096
+
 // Scouting holds LLM-backed scouting-report configuration.
 type Scouting struct {
 	Provider    string  `json:"provider,omitempty"`
@@ -200,6 +208,14 @@ func (c *Config) fillDefaults() {
 	}
 	if c.EventColors.LiveInning == "" {
 		c.EventColors.LiveInning = defaults.EventColors.LiveInning
+	}
+
+	// Only backfill max_tokens for a Scouting block that already exists.
+	// Allocating one here would defeat the pointer's omitempty behavior and
+	// write an otherwise-empty scouting block into every config. A user who
+	// set an explicit value keeps it because the guard is `<= 0`.
+	if c.Scouting != nil && c.Scouting.MaxTokens <= 0 {
+		c.Scouting.MaxTokens = DefaultScoutingMaxTokens
 	}
 }
 
