@@ -16,6 +16,50 @@ func TestRenderPrompt_IncludesSectionInstructions(t *testing.T) {
 	}
 }
 
+func TestSystemPrompt_FramesFactsAsVerifiedSpine(t *testing.T) {
+	system, _ := RenderPrompt(Context{})
+	if !strings.Contains(system, "verified spine") {
+		t.Error("system prompt should frame the supplied facts as the verified spine")
+	}
+	if !strings.Contains(system, "must appear verbatim") {
+		t.Error("system prompt missing the verbatim-number grounding rule")
+	}
+	if !strings.Contains(system, "Do not compute a new number") {
+		t.Error("system prompt should forbid computing new numbers or gaps")
+	}
+}
+
+func TestSystemPrompt_ForbidsInventedCareerRecord(t *testing.T) {
+	system, _ := RenderPrompt(Context{})
+	if !strings.Contains(system, "career-vs-opponent") {
+		t.Error("system prompt should forbid inventing a career-vs-opponent record")
+	}
+	if !strings.Contains(system, `"[Pitcher] is N-M vs [Team]"`) {
+		t.Error("system prompt should name the forbidden N-M-vs-Team phrasing")
+	}
+}
+
+func TestSystemPrompt_EdgeIsAnalyticalNotPrediction(t *testing.T) {
+	system, _ := RenderPrompt(Context{})
+	if !strings.Contains(system, "never a win prediction") {
+		t.Error("The Edge should be stated as an analytical edge, not a win prediction")
+	}
+}
+
+func TestSystemPrompt_VoiceRules(t *testing.T) {
+	system, _ := RenderPrompt(Context{})
+	if !strings.Contains(system, "sentence case") {
+		t.Error("system prompt should require sentence-case titles and prose")
+	}
+	if !strings.Contains(system, "Avoid hype words") {
+		t.Error("system prompt should carry the hype-word avoidance rule")
+	}
+	// The appended-section examples must themselves model sentence case.
+	if !strings.Contains(system, "## Hot bats, ## Trending, ## X-factor") {
+		t.Error("appended-section examples should be sentence case (## Hot bats), not Title Case")
+	}
+}
+
 func TestRenderPrompt_OmitsStatsCleanlyWhenNil(t *testing.T) {
 	ctx := Context{
 		GamePk:        1,
