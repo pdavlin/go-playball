@@ -51,7 +51,7 @@ func (m Model) renderPregameTabStrip(width int, selectedColor lipgloss.TerminalC
 
 // renderPregameTabBody dispatches to the body renderer for the active
 // tab. Cards return natural-height content; the caller fits it to the
-// height budget via renderPregameViewport.
+// height budget via renderTabBodyViewport.
 func (m Model) renderPregameTabBody(game *api.Game, width int) string {
 	switch m.pregameTab {
 	case PregameTabHotBats:
@@ -65,11 +65,11 @@ func (m Model) renderPregameTabBody(game *api.Game, width int) string {
 	}
 }
 
-// renderPregameViewport fits a tab body into the height budget. Short
+// renderTabBodyViewport fits a tab body into the height budget. Short
 // content is padded so the help bar stays pinned; overflow scrolls with
 // the same team-colored indicators as the plays viewport. offset is
 // clamped to the content bounds.
-func renderPregameViewport(game *api.Game, body string, width, height, offset int) string {
+func renderTabBodyViewport(game *api.Game, body string, width, height, offset int) string {
 	if height <= 0 {
 		return ""
 	}

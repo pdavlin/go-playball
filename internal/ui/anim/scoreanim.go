@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	scoreAnimFPS        = 20
-	scoreAnimFrames     = 30 // 1.5 seconds at 20fps
-	scoreRevealStart    = 20 // left-to-right reveal begins at frame 20
+	scoreAnimFPS     = 20
+	scoreAnimFrames  = 30 // 1.5 seconds at 20fps
+	scoreRevealStart = 20 // left-to-right reveal begins at frame 20
 )
 
 // ScoreAnimTickMsg triggers the next score animation frame.

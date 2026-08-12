@@ -22,7 +22,7 @@ func clampVisible(s string, n int) string {
 
 const (
 	SpinnerFPS        = 20
-	ellipsisAnimSpeed = 8 // frames per ellipsis step
+	ellipsisAnimSpeed = 8  // frames per ellipsis step
 	prerenderedFrames = 60 // 3 seconds of unique frames at 20fps
 )
 

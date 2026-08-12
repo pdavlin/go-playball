@@ -220,8 +220,6 @@ func (m Model) handleBoxScoreKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "down", "j":
 		m.panelScrollOffsets[m.focusedPanel]++
-	case "g":
-		m.panelScrollOffsets[m.focusedPanel] = 0
 	case "G":
 		m.panelScrollOffsets[m.focusedPanel] = 9999
 	}
@@ -237,35 +235,69 @@ func (m Model) handlePlaysKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "down", "j":
 		m.gameScrollOffset++
-	case "g":
-		m.gameScrollOffset = 0
 	case "G":
 		m.gameScrollOffset = 9999
 	}
 	return m, nil
 }
 
-// handleGameStatusKeys handles keys for the default live game status view
+// handleGameStatusKeys handles keys for the default live game status
+// view. Mirrors the pregame model: 1-3 direct tab selection, h/l/arrow
+// cycling with wrap, j/k/G scrolling the active tab body.
 func (m Model) handleGameStatusKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "1":
-		m.liveTab = LiveTabPlays
+		m = m.activateLiveTab(LiveTabPlays)
 	case "2":
-		m.liveTab = LiveTabPitchMix
+		m = m.activateLiveTab(LiveTabPitchMix)
 	case "3":
-		m.liveTab = LiveTabWinProb
+		m = m.activateLiveTab(LiveTabWinProb)
+	case "left", "h":
+		m = m.activateLiveTab(prevLiveTab(m.liveTab))
+	case "right", "l":
+		m = m.activateLiveTab(nextLiveTab(m.liveTab))
 	case "up", "k":
 		if m.gameScrollOffset > 0 {
 			m.gameScrollOffset--
 		}
 	case "down", "j":
 		m.gameScrollOffset++
-	case "g":
-		m.gameScrollOffset = 0
 	case "G":
 		m.gameScrollOffset = 9999
 	}
 	return m, nil
+}
+
+// activateLiveTab switches the live tab and resets the body scroll so
+// the new tab opens at the top.
+func (m Model) activateLiveTab(tab LiveTab) Model {
+	m.liveTab = tab
+	m.gameScrollOffset = 0
+	return m
+}
+
+// prevLiveTab and nextLiveTab walk the live tabs in strip order,
+// wrapping at the ends.
+func prevLiveTab(current LiveTab) LiveTab {
+	switch current {
+	case LiveTabPitchMix:
+		return LiveTabPlays
+	case LiveTabWinProb:
+		return LiveTabPitchMix
+	default:
+		return LiveTabWinProb
+	}
+}
+
+func nextLiveTab(current LiveTab) LiveTab {
+	switch current {
+	case LiveTabPlays:
+		return LiveTabPitchMix
+	case LiveTabPitchMix:
+		return LiveTabWinProb
+	default:
+		return LiveTabPlays
+	}
 }
 
 // renderGame renders the live game view
@@ -348,7 +380,7 @@ func (m Model) renderPreviewGame(game *api.Game) string {
 		bodyHeight = 4
 	}
 	body := m.renderPregameTabBody(game, m.width)
-	body = renderPregameViewport(game, body, m.width, bodyHeight, m.gameScrollOffset)
+	body = renderTabBodyViewport(game, body, m.width, bodyHeight, m.gameScrollOffset)
 
 	return lipgloss.JoinVertical(lipgloss.Left, overview, separator, strip, "", body)
 }
@@ -528,24 +560,15 @@ func (m Model) renderLiveGame(game *api.Game) string {
 
 	switch m.gameSubview {
 	case BoxScoreSubview:
-		header := m.renderCompactGameSituation(game)
-		separator := lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"}).
-			Render(strings.Repeat("─", m.width))
+		header, separator := m.renderGameHeaderBlock(game)
 		return lipgloss.JoinVertical(lipgloss.Left, header, separator, m.renderBoxScore(game))
 	case AllPlaysSubview:
-		header := m.renderCompactGameSituation(game)
-		separator := lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"}).
-			Render(strings.Repeat("─", m.width))
+		header, separator := m.renderGameHeaderBlock(game)
 		availableHeight := m.height - strings.Count(header, "\n") - 3
 		return lipgloss.JoinVertical(lipgloss.Left, header, separator,
 			m.renderPlays(game, availableHeight, m.width, false, true))
 	case ScoringPlaysSubview:
-		header := m.renderCompactGameSituation(game)
-		separator := lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"}).
-			Render(strings.Repeat("─", m.width))
+		header, separator := m.renderGameHeaderBlock(game)
 		availableHeight := m.height - strings.Count(header, "\n") - 3
 		return lipgloss.JoinVertical(lipgloss.Left, header, separator,
 			m.renderPlays(game, availableHeight, m.width, true, true))
@@ -554,15 +577,20 @@ func (m Model) renderLiveGame(game *api.Game) string {
 	}
 }
 
+// renderGameHeaderBlock returns the compact situation header and the
+// full-width separator used by every live subview.
+func (m Model) renderGameHeaderBlock(game *api.Game) (header, separator string) {
+	header = m.renderCompactGameSituation(game)
+	separator = lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"}).
+		Render(strings.Repeat("─", m.width))
+	return header, separator
+}
+
 // renderLiveGameStatus renders the default live game layout (matchup, at-bat, plays)
 func (m Model) renderLiveGameStatus(game *api.Game) string {
 	// Top row: Inning, Count, Bases, Line Score (all on one line)
-	topRow := m.renderCompactGameSituation(game)
-
-	// Separator line
-	separator := lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"}).
-		Render(strings.Repeat("─", m.width))
+	topRow, separator := m.renderGameHeaderBlock(game)
 
 	// Bottom section: Two columns
 	// Available height = terminal height minus:

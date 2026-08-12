@@ -624,7 +624,7 @@ func (m Model) renderHelpBar() string {
 				}
 				help = pregameKeys + " | b: box score | a: all plays | p: scoring | " + base
 			} else {
-				help = "1: Plays | 2: Mix | 3: WinProb | b: box score | a: all plays | p: scoring | jk: scroll | " + base
+				help = "1-3/hl: tabs | jk: scroll | b: box score | a: all plays | p: scoring | " + base
 			}
 		default:
 			help = "jk: scroll | " + base

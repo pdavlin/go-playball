@@ -200,7 +200,7 @@ func TestPitcherDetailPayloadCarriesErrors(t *testing.T) {
 
 func TestPregameViewportPadsShortContent(t *testing.T) {
 	game := &api.Game{GameData: &api.GameData{}}
-	out := renderPregameViewport(game, "a\nb", 40, 5, 0)
+	out := renderTabBodyViewport(game, "a\nb", 40, 5, 0)
 	if got := len(strings.Split(out, "\n")); got != 5 {
 		t.Fatalf("padded viewport = %d lines, want 5", got)
 	}
@@ -218,7 +218,7 @@ func TestPregameViewportScrollsOverflow(t *testing.T) {
 	body := strings.Join(lines, "\n")
 
 	// At the top: no up indicator, first line visible, down indicator present.
-	top := renderPregameViewport(game, body, 40, 5, 0)
+	top := renderTabBodyViewport(game, body, 40, 5, 0)
 	if !strings.Contains(top, "line0") {
 		t.Errorf("top viewport missing first line: %q", top)
 	}
@@ -227,11 +227,31 @@ func TestPregameViewportScrollsOverflow(t *testing.T) {
 	}
 
 	// Huge offset clamps to the bottom and shows the last line.
-	bottom := renderPregameViewport(game, body, 40, 5, 9999)
+	bottom := renderTabBodyViewport(game, body, 40, 5, 9999)
 	if !strings.Contains(bottom, "line11") {
 		t.Errorf("bottom viewport missing last line: %q", bottom)
 	}
 	if got := len(strings.Split(bottom, "\n")); got != 5 {
 		t.Errorf("bottom viewport = %d lines, want 5", got)
+	}
+}
+
+func TestLiveTabCycle(t *testing.T) {
+	game := &api.Game{ID: 1, GameData: &api.GameData{}}
+	m := Model{currentGame: game, liveTab: LiveTabPlays, gameScrollOffset: 7}
+
+	updated, _ := m.handleGameStatusKeys(testKeyMsg("l"))
+	got := updated.(Model)
+	if got.liveTab != LiveTabPitchMix {
+		t.Errorf("l from Plays should land on Mix, got %v", got.liveTab)
+	}
+	if got.gameScrollOffset != 0 {
+		t.Errorf("tab switch should reset scroll, got %d", got.gameScrollOffset)
+	}
+
+	m.liveTab = LiveTabPlays
+	updated, _ = m.handleGameStatusKeys(testKeyMsg("h"))
+	if got := updated.(Model).liveTab; got != LiveTabWinProb {
+		t.Errorf("h from Plays should wrap to WinProb, got %v", got)
 	}
 }
