@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"image/color"
+	"sort"
 	"strings"
 	"time"
 
@@ -579,6 +580,72 @@ func (m Model) View() string {
 	return rendered
 }
 
+// helpItem is one whole entry in the help bar (e.g. "q: quit"). Entries
+// are never cut mid-token: buildHelpBar either renders an item in full
+// or drops it entirely.
+type helpItem struct {
+	text string
+	// priority ranks which items survive when the bar is too narrow
+	// for all of them. Higher priority is kept longest. Use the
+	// helpPriority* constants below rather than raw numbers.
+	priority int
+}
+
+// Priority tiers for help-bar items, from "drop first" to "never drop".
+// Every per-view item list below is commented with which tier its
+// entries landed in and why.
+const (
+	helpPriorityConvenience = iota // nice-to-have shortcuts (day paging, panel numbers, window toggle)
+	helpPriorityNav                // secondary navigation (view/tab switches, scroll)
+	helpPriorityCore               // the view's primary action and global quit; never drop while anything fits
+)
+
+// buildHelpBar assembles a single-line help string from items, keeping
+// as many WHOLE items as fit within width. Items are considered in
+// descending priority order so a wide low-priority item never bumps a
+// higher-priority item off the bar just because it sits later in the
+// list; survivors are then joined in their original left-to-right
+// order (with " | " separators), so the bar reads the same as before,
+// just possibly shorter.
+func buildHelpBar(items []helpItem, width int) string {
+	if width <= 0 || len(items) == 0 {
+		return ""
+	}
+
+	order := make([]int, len(items))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		return items[order[a]].priority > items[order[b]].priority
+	})
+
+	kept := make([]bool, len(items))
+	total := 0
+	count := 0
+	for _, idx := range order {
+		w := lipgloss.Width(items[idx].text)
+		sep := 0
+		if count > 0 {
+			sep = 3 // " | "
+		}
+		if total+sep+w > width {
+			continue
+		}
+		total += sep + w
+		count++
+		kept[idx] = true
+	}
+
+	parts := make([]string, 0, count)
+	for i, it := range items {
+		if kept[i] {
+			parts = append(parts, it.text)
+		}
+	}
+	return strings.Join(parts, " | ")
+}
+
 // reportHelpEntry returns the help-bar fragment for the current schedule
 // selection ("r: scouting", "r: recap") or "" when no report is
 // available.
@@ -593,69 +660,157 @@ func (m Model) reportHelpEntry() string {
 	return "r: " + label
 }
 
-// renderHelpBar renders the help bar with keyboard shortcuts
-func (m Model) renderHelpBar() string {
-	var help string
+// activeSubviewLabel returns the help item text for the currently
+// active game subview, used to apply the team-color gradient. Empty
+// when there is no such label (non-game views).
+func (m Model) activeSubviewLabel() string {
+	switch m.gameSubview {
+	case BoxScoreSubview:
+		return "b: box score"
+	case AllPlaysSubview:
+		return "a: all plays"
+	case ScoringPlaysSubview:
+		return "p: scoring"
+	case GameStatusSubview:
+		return "g: game"
+	}
+	return ""
+}
+
+// helpItems returns the full, priority-tagged item list for the
+// current view/subview state. Order is the desired left-to-right
+// display order; buildHelpBar decides which survive at the current
+// width.
+func (m Model) helpItems() []helpItem {
+	quit := helpItem{"q: quit", helpPriorityCore}
+	schedule := helpItem{"c: schedule", helpPriorityNav}
+	standings := helpItem{"s: standings", helpPriorityNav}
+
 	switch m.view {
 	case ScheduleView:
-		help = "c: schedule | s: standings | hjkl/arrows: navigate | enter: view game | p/n: prev/next day | t: today | q: quit"
-		if entry := m.reportHelpEntry(); entry != "" {
-			help = entry + " | " + help
+		items := []helpItem{
+			schedule,
+			standings,
+			{"hjkl/arrows: navigate", helpPriorityCore},
+			{"enter: view game", helpPriorityCore},
+			{"p/n: prev/next day", helpPriorityConvenience},
+			{"t: today", helpPriorityConvenience},
+			quit,
 		}
-	case StandingsView:
-		help = "c: schedule | s: standings | q: quit"
-	case GameView:
-		base := "c: schedule | s: standings | q: quit"
+		if entry := m.reportHelpEntry(); entry != "" {
+			items = append([]helpItem{{entry, helpPriorityNav}}, items...)
+		}
+		return items
 
-		switch m.gameSubview {
-		case BoxScoreSubview:
-			help = "g: game | b: box score | a: all plays | p: scoring | 1-4: panels | jk: scroll | " + base
-		case AllPlaysSubview:
-			help = "g: game | b: box score | a: all plays | p: scoring | jk: scroll | " + base
-		case ScoringPlaysSubview:
-			help = "g: game | b: box score | a: all plays | p: scoring | jk: scroll | " + base
-		case GameStatusSubview:
-			if isPreviewGame(m.currentGame) {
-				pregameKeys := "1-4/hl: tabs | jk: scroll"
-				if m.pregameTab == PregameTabHotBats {
-					pregameKeys += " | , .: window"
-				}
-				help = pregameKeys + " | b: box score | a: all plays | p: scoring | " + base
-			} else {
-				help = "1-3/hl: tabs | jk: scroll | b: box score | a: all plays | p: scoring | " + base
+	case StandingsView:
+		return []helpItem{schedule, standings, quit}
+
+	case GameView:
+		base := []helpItem{schedule, standings, quit}
+		return append(m.gameSubviewHelpItems(), base...)
+	}
+
+	return nil
+}
+
+// gameSubviewHelpItems returns the subview-specific items for the game
+// view (everything before the shared c/s/q base). It is state-aware so
+// it never advertises a key that does nothing in the current state:
+//   - Final games never show "1-3/hl: tabs" (the live tab strip):
+//     renderFinalGame ignores m.liveTab entirely, so those keys are
+//     dead there. Panel selection (1-4) is also only wired up in
+//     BoxScoreSubview (handleGameStatusKeys, reached via GameStatusSubview,
+//     doesn't route 1-4 to handleBoxScoreKeys), so it's omitted from the
+//     GameStatusSubview branch even for a final game.
+//   - Preview games drop "a: all plays" and "p: scoring": renderGame's
+//     Preview branch always renders the pregame tabs regardless of
+//     gameSubview, so those keys have no visible effect before the game
+//     starts. "b: box score" is dropped for the same reason -- the box
+//     score never renders pre-game -- and because switching gameSubview
+//     to BoxScoreSubview would silently reroute jk from tab-scroll to
+//     panel-scroll on the next keypress.
+func (m Model) gameSubviewHelpItems() []helpItem {
+	g := helpItem{"g: game", helpPriorityNav}
+	b := helpItem{"b: box score", helpPriorityNav}
+	a := helpItem{"a: all plays", helpPriorityNav}
+	p := helpItem{"p: scoring", helpPriorityNav}
+	scroll := helpItem{"jk: scroll", helpPriorityNav}
+
+	// Whichever subview is active gets bumped to core priority so it's
+	// the last thing dropped -- you should always be able to tell what
+	// key got you to the screen you're looking at.
+	bump := func(it helpItem, label string) helpItem {
+		if label == it.text {
+			it.priority = helpPriorityCore
+		}
+		return it
+	}
+	active := m.activeSubviewLabel()
+	g, b, a, p = bump(g, active), bump(b, active), bump(a, active), bump(p, active)
+
+	switch m.gameSubview {
+	case BoxScoreSubview:
+		return []helpItem{g, b, a, p, {"1-4: panels", helpPriorityConvenience}, scroll}
+	case AllPlaysSubview, ScoringPlaysSubview:
+		return []helpItem{g, b, a, p, scroll}
+	case GameStatusSubview:
+		if isPreviewGame(m.currentGame) {
+			items := []helpItem{
+				{"1-4/hl: tabs", helpPriorityCore},
+				scroll,
 			}
-		default:
-			help = "jk: scroll | " + base
+			if m.pregameTab == PregameTabHotBats {
+				items = append(items, helpItem{", .: window", helpPriorityConvenience})
+			}
+			return items
+		}
+		if isFinalGame(m.currentGame) {
+			// GameStatusSubview on a final game renders the same box
+			// score as BoxScoreSubview (renderFinalGame's default
+			// case), just without panel selection wired up.
+			return []helpItem{g, b, a, p, scroll}
+		}
+		return []helpItem{{"1-3/hl: tabs", helpPriorityCore}, scroll, b, a, p}
+	}
+	return []helpItem{scroll}
+}
+
+// renderHelpBar renders the help bar with keyboard shortcuts, fit to
+// the terminal width as whole items (see buildHelpBar).
+func (m Model) renderHelpBar() string {
+	// helpStyle carries Padding(0, 1): 1 column on each side counts
+	// against the content budget below.
+	budget := m.width - 2
+	if budget < 0 {
+		budget = 0
+	}
+
+	spinnerPrefix := ""
+	if m.spinner != nil && m.spinner.State() == anim.SpinnerRunning {
+		spinnerPrefix = m.spinner.View() + "  "
+		budget -= lipgloss.Width(spinnerPrefix)
+		if budget < 0 {
+			budget = 0
 		}
 	}
 
-	// Apply team-color gradient to the active subview label
+	help := buildHelpBar(m.helpItems(), budget)
+
+	// Apply team-color gradient to the active subview label, if it
+	// survived the width cut.
 	if m.view == GameView && m.currentGame != nil {
-		activeLabel := ""
-		switch m.gameSubview {
-		case BoxScoreSubview:
-			activeLabel = "b: box score"
-		case AllPlaysSubview:
-			activeLabel = "a: all plays"
-		case ScoringPlaysSubview:
-			activeLabel = "p: scoring"
-		case GameStatusSubview:
-			activeLabel = "g: game"
-		}
-		if activeLabel != "" {
+		if activeLabel := m.activeSubviewLabel(); activeLabel != "" && strings.Contains(help, activeLabel) {
 			away, home := getGameTeamColors(m.currentGame)
 			gradLabel := anim.BlendGradientBold(activeLabel, away, home)
 			help = strings.Replace(help, activeLabel, gradLabel, 1)
 		}
 	}
 
-	if m.spinner != nil && m.spinner.State() == anim.SpinnerRunning {
-		help = m.spinner.View() + "  " + help
-	}
+	help = spinnerPrefix + help
 
-	// The help bar is a fixed single line: content that would wrap at
-	// narrow widths is truncated instead, so the bar never changes
-	// height and shifts the layout above it.
+	// MaxHeight(1) stays as a final guard: buildHelpBar already fits
+	// the content to width, but this keeps the bar from ever growing
+	// past one line if that invariant is violated some other way.
 	return helpStyle.Width(m.width).MaxHeight(1).Render(help)
 }
 
