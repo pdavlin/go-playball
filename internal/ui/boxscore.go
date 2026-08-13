@@ -336,9 +336,12 @@ func buildPitcherRows(team api.BoxscoreTeam, players map[string]api.GameDataPlay
 
 		name := getPlayerName(p, players)
 
-		// Add pitching note (W, L, S, H, etc.)
+		// Add pitching note (W, L, S, H, etc.). The API's Note field
+		// sometimes already includes its own parens, so strip any
+		// existing wrapping before re-adding ours to avoid "((".
 		if p.Stats.Pitching != nil && p.Stats.Pitching.Note != "" {
-			name = name + " (" + p.Stats.Pitching.Note + ")"
+			note := strings.Trim(p.Stats.Pitching.Note, "()")
+			name = name + " (" + note + ")"
 		}
 
 		ip, h, r, er, bb, k, hr := "0.0", "0", "0", "0", "0", "0", "0"

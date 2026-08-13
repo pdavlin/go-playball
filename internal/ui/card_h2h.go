@@ -202,18 +202,20 @@ func renderH2HStatGrid(p *h2hPayload, awayAbbr, homeAbbr string) string {
 		Foreground(lipgloss.AdaptiveColor{Light: "#666666", Dark: "#888888"})
 	valueStyle := lipgloss.NewStyle().Bold(true)
 
-	var row1, row2 strings.Builder
+	var row1Cols, row2Cols []string
 	for i, c := range cells {
 		cell := labelStyle.Render(c.label) + "\n" + valueStyle.Render(c.value)
 		col := lipgloss.NewStyle().Width(cellWidth).Render(cell)
 		if i < 3 {
-			row1.WriteString(col)
+			row1Cols = append(row1Cols, col)
 		} else {
-			row2.WriteString(col)
+			row2Cols = append(row2Cols, col)
 		}
 	}
 
-	return row1.String() + "\n" + row2.String()
+	row1 := lipgloss.JoinHorizontal(lipgloss.Top, row1Cols...)
+	row2 := lipgloss.JoinHorizontal(lipgloss.Top, row2Cols...)
+	return row1 + "\n" + row2
 }
 
 // renderH2HSkeleton renders the loading state in the table shape so
@@ -242,16 +244,18 @@ func renderH2HSkeleton(
 		Foreground(lipgloss.AdaptiveColor{Light: "#666666", Dark: "#888888"})
 	cellWidth := 22
 	labels := []string{"Runs", "Run diff", "Avg score", "Avg total", "1-run games", "Largest margin"}
-	var row1, row2 strings.Builder
+	var row1Cols, row2Cols []string
 	for i, label := range labels {
 		cell := labelStyle.Render(label) + "\n" + skeletonCell(spinner, 10)
 		col := lipgloss.NewStyle().Width(cellWidth).Render(cell)
 		if i < 3 {
-			row1.WriteString(col)
+			row1Cols = append(row1Cols, col)
 		} else {
-			row2.WriteString(col)
+			row2Cols = append(row2Cols, col)
 		}
 	}
 
-	return header + "\n" + bar + "\n\n" + last + "\n\n" + row1.String() + "\n" + row2.String()
+	row1 := lipgloss.JoinHorizontal(lipgloss.Top, row1Cols...)
+	row2 := lipgloss.JoinHorizontal(lipgloss.Top, row2Cols...)
+	return header + "\n" + bar + "\n\n" + last + "\n\n" + row1 + "\n" + row2
 }
