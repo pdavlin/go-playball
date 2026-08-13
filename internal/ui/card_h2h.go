@@ -82,6 +82,10 @@ func renderH2HSeriesHeader(
 
 // renderH2HBipolarBar renders a proportional bar split between the two
 // teams. Total wins == games (ignoring ties, which MLB has none of).
+// A thin contrasting marker always separates the two fills so the bar
+// reads as a ratio rather than a solid divider; a shut-out side (0
+// wins) still gets a dim sliver so it visibly reads as "all one team"
+// instead of disappearing entirely.
 func renderH2HBipolarBar(p *h2hPayload, awayColors, homeColors TeamColors, width int) string {
 	barWidth := width - 4
 	if barWidth < 10 {
@@ -91,20 +95,50 @@ func renderH2HBipolarBar(p *h2hPayload, awayColors, homeColors TeamColors, width
 	if total == 0 {
 		return strings.Repeat("─", barWidth)
 	}
-	awayCells := int(float64(p.awayWins) / float64(total) * float64(barWidth))
+
+	// Reserve one cell for the split marker between the two fills.
+	fillWidth := barWidth - 1
+	if fillWidth < 2 {
+		fillWidth = 2
+	}
+
+	awayCells := int(float64(p.awayWins) / float64(total) * float64(fillWidth))
 	if awayCells < 0 {
 		awayCells = 0
 	}
-	if awayCells > barWidth {
-		awayCells = barWidth
+	if awayCells > fillWidth {
+		awayCells = fillWidth
 	}
-	homeCells := barWidth - awayCells
+	homeCells := fillWidth - awayCells
 
-	awayFill := lipgloss.NewStyle().Foreground(awayColors.Primary).
-		Render(strings.Repeat("█", awayCells))
-	homeFill := lipgloss.NewStyle().Foreground(homeColors.Primary).
-		Render(strings.Repeat("█", homeCells))
-	return awayFill + homeFill
+	dimColor := lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"}
+	dimAway, dimHome := false, false
+	if p.awayWins == 0 && awayCells == 0 && homeCells > 1 {
+		awayCells = 1
+		homeCells--
+		dimAway = true
+	} else if p.homeWins == 0 && homeCells == 0 && awayCells > 1 {
+		homeCells = 1
+		awayCells--
+		dimHome = true
+	}
+
+	awayStyle := lipgloss.NewStyle().Foreground(awayColors.Primary)
+	if dimAway {
+		awayStyle = lipgloss.NewStyle().Foreground(dimColor)
+	}
+	homeStyle := lipgloss.NewStyle().Foreground(homeColors.Primary)
+	if dimHome {
+		homeStyle = lipgloss.NewStyle().Foreground(dimColor)
+	}
+	markerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#EEEEEE"})
+
+	awayFill := awayStyle.Render(strings.Repeat("█", awayCells))
+	homeFill := homeStyle.Render(strings.Repeat("█", homeCells))
+	marker := markerStyle.Render("│")
+
+	return awayFill + marker + homeFill
 }
 
 func renderH2HLastMeeting(p *h2hPayload, awayAbbr, homeAbbr string) string {
