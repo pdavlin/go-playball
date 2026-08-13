@@ -574,12 +574,20 @@ func (m Model) renderLiveGame(game *api.Game) string {
 		return lipgloss.JoinVertical(lipgloss.Left, header, separator, m.renderBoxScore(game))
 	case AllPlaysSubview:
 		header, separator := m.renderGameHeaderBlock(game)
-		availableHeight := m.height - strings.Count(header, "\n") - 3
+		// -6 accounts for renderGame's fixed prefix above this block
+		// (title line + titleStyle's MarginBottom(1) blank line + the
+		// caller's own explicit "\n\n" — three lines total) plus the
+		// separator and help bar below it. Undercounting this budget
+		// let the plays list overflow the terminal by exactly the
+		// amount undercounted, which scrolled the title off-screen —
+		// invisible on Scoring Plays (short lists never reach the
+		// budget) but reliable on All Plays (long lists always do).
+		availableHeight := m.height - strings.Count(header, "\n") - 6
 		return lipgloss.JoinVertical(lipgloss.Left, header, separator,
 			m.renderPlays(game, availableHeight, m.width, false, true))
 	case ScoringPlaysSubview:
 		header, separator := m.renderGameHeaderBlock(game)
-		availableHeight := m.height - strings.Count(header, "\n") - 3
+		availableHeight := m.height - strings.Count(header, "\n") - 6
 		return lipgloss.JoinVertical(lipgloss.Left, header, separator,
 			m.renderPlays(game, availableHeight, m.width, true, true))
 	default:

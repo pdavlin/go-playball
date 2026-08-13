@@ -181,6 +181,88 @@ func TestRenderH2HBipolarBarBalanced(t *testing.T) {
 	}
 }
 
+// TestRenderH2HStatGridComposesHorizontally guards against the grid
+// collapsing back into vertically-concatenated cells (each cell is a
+// "label\nvalue" block; row assembly must join them side by side with
+// lipgloss.JoinHorizontal, not string-concatenate them).
+func TestRenderH2HStatGridComposesHorizontally(t *testing.T) {
+	p := &h2hPayload{
+		games:         5,
+		awayRunsTotal: 22,
+		homeRunsTotal: 18,
+		oneRunGames:   2,
+		largestMargin: 6,
+	}
+	out := renderH2HStatGrid(p, "AWY", "HOM")
+	lines := strings.Split(out, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines (2 rows x label/value), got %d: %q", len(lines), lines)
+	}
+
+	row1Labels, row1Values := lines[0], lines[1]
+	row2Labels, row2Values := lines[2], lines[3]
+
+	for _, want := range []string{"Runs", "Run diff", "Avg score"} {
+		if !strings.Contains(row1Labels, want) {
+			t.Errorf("row1 labels missing %q, got: %q", want, row1Labels)
+		}
+	}
+	for _, unwanted := range []string{"Avg total", "1-run games", "Largest margin"} {
+		if strings.Contains(row1Labels, unwanted) {
+			t.Errorf("row1 labels should not contain row2 label %q, got: %q", unwanted, row1Labels)
+		}
+	}
+
+	for _, want := range []string{"22-18", "+4 AWY", "4.4-3.6"} {
+		if !strings.Contains(row1Values, want) {
+			t.Errorf("row1 values missing %q, got: %q", want, row1Values)
+		}
+	}
+
+	for _, want := range []string{"Avg total", "1-run games", "Largest margin"} {
+		if !strings.Contains(row2Labels, want) {
+			t.Errorf("row2 labels missing %q, got: %q", want, row2Labels)
+		}
+	}
+
+	for _, want := range []string{"8.0 R/G", "2", "6"} {
+		if !strings.Contains(row2Values, want) {
+			t.Errorf("row2 values missing %q, got: %q", want, row2Values)
+		}
+	}
+}
+
+// TestRenderH2HSkeletonComposesHorizontally is the loading-state
+// counterpart of TestRenderH2HStatGridComposesHorizontally: the
+// skeleton must lay out its label row the same way the loaded grid
+// does, so the layout doesn't jump when data arrives.
+func TestRenderH2HSkeletonComposesHorizontally(t *testing.T) {
+	out := renderH2HSkeleton("AWY", "HOM", TeamColors{}, TeamColors{}, nil, 100)
+	lines := strings.Split(out, "\n")
+
+	var row1Labels, row2Labels string
+	for _, l := range lines {
+		if strings.Contains(l, "Runs") && strings.Contains(l, "Run diff") {
+			row1Labels = l
+		}
+		if strings.Contains(l, "Avg total") && strings.Contains(l, "Largest margin") {
+			row2Labels = l
+		}
+	}
+	if row1Labels == "" {
+		t.Fatalf("expected a line with Runs + Run diff + Avg score together, got: %q", lines)
+	}
+	if !strings.Contains(row1Labels, "Avg score") {
+		t.Errorf("row1 labels missing Avg score, got: %q", row1Labels)
+	}
+	if row2Labels == "" {
+		t.Fatalf("expected a line with Avg total + 1-run games + Largest margin together, got: %q", lines)
+	}
+	if !strings.Contains(row2Labels, "1-run games") {
+		t.Errorf("row2 labels missing 1-run games, got: %q", row2Labels)
+	}
+}
+
 func TestRenderH2HBodyShowsAggregates(t *testing.T) {
 	p := &h2hPayload{
 		loaded: true, games: 5,
