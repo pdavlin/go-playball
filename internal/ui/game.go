@@ -93,6 +93,20 @@ func isPreviewGame(game *api.Game) bool {
 	return state == "Preview"
 }
 
+// isFinalGame reports whether the given game has finished. Used by the
+// help bar to avoid advertising the live tab strip (1-3/hl), which
+// renderFinalGame never looks at.
+func isFinalGame(game *api.Game) bool {
+	if game == nil {
+		return false
+	}
+	state := game.Status.AbstractGameState
+	if state == "" && game.GameData != nil {
+		state = game.GameData.Status.AbstractGameState
+	}
+	return state == "Final"
+}
+
 // handlePregameKeys handles navigation for a Preview game. The model is
 // shared across all tabs:
 //   - 1-4 → direct tab selection
