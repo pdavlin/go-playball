@@ -1993,8 +1993,9 @@ func (m Model) renderDecisions(game *api.Game) string {
 		}
 	}
 
-	// Center the decisions on screen
-	decisionsText := strings.Join(parts, "\n")
+	// Left-align the Win/Loss/Save lines with each other first (so labels
+	// don't zig-zag), then center that block as a whole on screen.
+	decisionsText := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	centered := lipgloss.NewStyle().
 		Width(m.width).
 		Align(lipgloss.Center).

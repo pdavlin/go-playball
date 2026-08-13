@@ -13,10 +13,13 @@ import (
 
 var (
 	battingHeaders = []string{"Batters", "AB", "R", "H", "RBI", "BB", "K", "AVG", "OPS"}
-	battingWidths  = []int{0, 4, 4, 4, 4, 4, 4, 6, 6}
+	// Stat columns are sized to their content (e.g. "RBI", ".238", "1.000")
+	// rather than padded generously, so the name column keeps as much of
+	// the reclaimed panel width as possible (see F5).
+	battingWidths = []int{0, 3, 3, 3, 3, 3, 3, 5, 5}
 
 	pitchingHeaders = []string{"Pitchers", "IP", "H", "R", "ER", "BB", "K", "HR", "ERA"}
-	pitchingWidths  = []int{0, 5, 4, 4, 4, 4, 4, 4, 6}
+	pitchingWidths  = []int{0, 4, 3, 3, 3, 3, 3, 3, 5}
 )
 
 // minSideBySideWidth is the minimum terminal width for 2x2 grid layout.
@@ -80,11 +83,11 @@ func (m Model) renderBoxScore(game *api.Game) string {
 	}
 	textWidth := panelWidth - 4 // usable text area inside border + padding
 
-	// Render tables constrained to text width
-	awayBatTable := renderTable(battingHeaders, battingWidths, awayBatRows, textWidth)
-	homeBatTable := renderTable(battingHeaders, battingWidths, homeBatRows, textWidth)
-	awayPitchTable := renderTable(pitchingHeaders, pitchingWidths, awayPitchRows, textWidth)
-	homePitchTable := renderTable(pitchingHeaders, pitchingWidths, homePitchRows, textWidth)
+	// Render tables constrained to text width. Away/home pairs share column
+	// geometry (via renderTablePair) so headers and stat columns land at the
+	// same x position in both panels, even when one side's names are longer.
+	awayBatTable, homeBatTable := renderTablePair(battingHeaders, battingWidths, awayBatRows, homeBatRows, textWidth)
+	awayPitchTable, homePitchTable := renderTablePair(pitchingHeaders, pitchingWidths, awayPitchRows, homePitchRows, textWidth)
 
 	if sideBySide {
 		return m.renderBoxScore2x2(
