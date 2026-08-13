@@ -61,6 +61,11 @@ func (m Model) handleGameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if isPreviewGame(m.currentGame) {
 			return m.handlePregameKeys(msg)
 		}
+		if gameState == "Final" {
+			// A final game renders the box score in this subview, so
+			// 1-4 and j/k drive the panels that are actually on screen.
+			return m.handleBoxScoreKeys(msg)
+		}
 		return m.handleGameStatusKeys(msg)
 	}
 
@@ -593,7 +598,11 @@ func (m Model) renderLiveGame(game *api.Game) string {
 	switch m.gameSubview {
 	case BoxScoreSubview:
 		header, separator := m.renderGameHeaderBlock(game)
-		return lipgloss.JoinVertical(lipgloss.Left, header, separator, m.renderBoxScore(game))
+		// renderGame prepends title(1) + blank(1); separator(1) and the
+		// help bar(1) take the rest.
+		availableHeight := m.height - lipgloss.Height(header) - 4
+		return lipgloss.JoinVertical(lipgloss.Left, header, separator,
+			m.renderBoxScore(game, availableHeight))
 	case AllPlaysSubview:
 		header, separator := m.renderGameHeaderBlock(game)
 		// -6 accounts for renderGame's fixed prefix above this block
@@ -678,6 +687,100 @@ func (m Model) renderLiveGameStatus(game *api.Game) string {
 		separator,
 		bottomSection,
 	)
+}
+
+// liveLeftColumnWidth returns the width of the live view's left column
+// plus its divider. The compact linescore starts at that offset, so the
+// header and the two-column body stay aligned.
+func liveLeftColumnWidth(termWidth int) int {
+	return (termWidth-3)/2 + 3
+}
+
+// liveTotalInnings returns the number of inning columns the live
+// linescore wants to show (9, or more in extras).
+func liveTotalInnings(ls api.Linescore) int {
+	if ls.CurrentInning < 9 {
+		return 9
+	}
+	return ls.CurrentInning
+}
+
+// linescoreLayout describes how the live linescore is drawn at a given
+// terminal width.
+type linescoreLayout struct {
+	cellWidth   int // columns per inning cell
+	gap         int // spaces between the innings block and the R column
+	firstInning int // 0-based index of the first inning column drawn
+}
+
+// elided reports whether early innings were dropped, in which case a
+// "…" marker takes their place.
+func (l linescoreLayout) elided() bool { return l.firstInning > 0 }
+
+// width returns the terminal columns the linescore block occupies: the
+// 3-char team abbreviation, the inning cells (plus the "…" marker when
+// early innings are dropped), the gap and "R  H  E".
+func (l linescoreLayout) width(totalInnings int) int {
+	cols := totalInnings - l.firstInning
+	if l.elided() {
+		cols++
+	}
+	return 3 + l.cellWidth*cols + l.gap + 7
+}
+
+// liveLinescoreLayout picks the richest linescore that fits the columns
+// remaining to the right of the live view's left column. Degradation
+// order: tighten the gap before the R column, then the inning cell
+// padding, then drop the earliest innings behind a "…" marker. R, H and
+// E are never dropped (F7).
+func liveLinescoreLayout(totalInnings, termWidth int) linescoreLayout {
+	if totalInnings < 1 {
+		totalInnings = 1
+	}
+	avail := termWidth - liveLeftColumnWidth(termWidth)
+
+	candidates := []linescoreLayout{
+		{cellWidth: 3, gap: 3},
+		{cellWidth: 3, gap: 2},
+		{cellWidth: 2, gap: 2},
+	}
+	for _, l := range candidates {
+		if l.width(totalInnings) <= avail {
+			return l
+		}
+	}
+
+	l := candidates[len(candidates)-1]
+	for first := 1; first < totalInnings; first++ {
+		l.firstInning = first
+		if l.width(totalInnings) <= avail {
+			return l
+		}
+	}
+	// Nothing but the latest inning fits; R/H/E still stay.
+	l.firstInning = totalInnings - 1
+	return l
+}
+
+// linescoreInnings renders one team's inning cells for the given layout.
+// homeAway is "away" or "home".
+func linescoreInnings(ls api.Linescore, totalInnings int, homeAway string, layout linescoreLayout) string {
+	var b strings.Builder
+	if layout.elided() {
+		fmt.Fprintf(&b, "%*s", layout.cellWidth, "…")
+	}
+	for i := layout.firstInning; i < totalInnings; i++ {
+		if i >= len(ls.Innings) {
+			b.WriteString(strings.Repeat(" ", layout.cellWidth))
+			continue
+		}
+		score := ls.Innings[i].Away
+		if homeAway == "home" {
+			score = ls.Innings[i].Home
+		}
+		fmt.Fprintf(&b, "%*d", layout.cellWidth, score.RunsVal())
+	}
+	return b.String()
 }
 
 // renderCompactGameSituation renders the scoreboard as a 3-line grid:
@@ -769,10 +872,12 @@ func (m Model) renderCompactGameSituation(game *api.Game) string {
 	awayColors := GetTeamColors(awayName)
 	homeColors := GetTeamColors(homeName)
 
-	totalInnings := ls.CurrentInning
-	if totalInnings < 9 {
-		totalInnings = 9
-	}
+	totalInnings := liveTotalInnings(ls)
+
+	// Fit the linescore into the columns left of the screen edge. It
+	// degrades by tightening spacing, then by dropping the earliest
+	// innings behind a "…" marker; R/H/E always survive (F7).
+	layout := liveLinescoreLayout(totalInnings, m.width)
 
 	scoreStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.AdaptiveColor{Light: "#666666", Dark: "#AAAAAA"})
@@ -782,10 +887,13 @@ func (m Model) renderCompactGameSituation(game *api.Game) string {
 
 	// Header row
 	lsHeader := fmt.Sprintf("%-3s", "")
-	for i := 1; i <= totalInnings; i++ {
-		lsHeader += fmt.Sprintf(" %2d", i)
+	if layout.firstInning > 0 {
+		lsHeader += fmt.Sprintf("%*s", layout.cellWidth, "…")
 	}
-	lsHeader += "   "
+	for i := layout.firstInning + 1; i <= totalInnings; i++ {
+		lsHeader += fmt.Sprintf("%*d", layout.cellWidth, i)
+	}
+	lsHeader += strings.Repeat(" ", layout.gap)
 	lsHeaderStyled := scoreStyle.Render(lsHeader) + rheBold.Render("R  H  E")
 
 	// Away row
@@ -796,17 +904,12 @@ func (m Model) renderCompactGameSituation(game *api.Game) string {
 	if m.scoreAnim != nil && m.scoreAnim.IsActive() && m.scoreAnim.AwayChanged() {
 		awayLineStyled = awayAbbrStyled + m.scoreAnim.AwayView()
 	} else {
-		awayInnings := ""
-		for i := 0; i < totalInnings; i++ {
-			if i < len(ls.Innings) {
-				awayInnings += fmt.Sprintf(" %2d", ls.Innings[i].Away.RunsVal())
-			} else {
-				awayInnings += "   "
-			}
-		}
+		awayInnings := linescoreInnings(ls, totalInnings, "away", layout)
 		awayR := fmt.Sprintf("%2d", ls.Teams.Away.Runs)
 		awayHE := fmt.Sprintf(" %2d %2d", ls.Teams.Away.Hits, ls.Teams.Away.Errors)
-		awayLineStyled = awayAbbrStyled + scoreStyle.Render(awayInnings+"  ") + awayR + scoreStyle.Render(awayHE)
+		awayLineStyled = awayAbbrStyled +
+			scoreStyle.Render(awayInnings+strings.Repeat(" ", layout.gap-1)) +
+			awayR + scoreStyle.Render(awayHE)
 	}
 
 	// Home row
@@ -817,23 +920,18 @@ func (m Model) renderCompactGameSituation(game *api.Game) string {
 	if m.scoreAnim != nil && m.scoreAnim.IsActive() && m.scoreAnim.HomeChanged() {
 		homeLineStyled = homeAbbrStyled + m.scoreAnim.HomeView()
 	} else {
-		homeInnings := ""
-		for i := 0; i < totalInnings; i++ {
-			if i < len(ls.Innings) {
-				homeInnings += fmt.Sprintf(" %2d", ls.Innings[i].Home.RunsVal())
-			} else {
-				homeInnings += "   "
-			}
-		}
+		homeInnings := linescoreInnings(ls, totalInnings, "home", layout)
 		homeR := fmt.Sprintf("%2d", ls.Teams.Home.Runs)
 		homeHE := fmt.Sprintf(" %2d %2d", ls.Teams.Home.Hits, ls.Teams.Home.Errors)
-		homeLineStyled = homeAbbrStyled + scoreStyle.Render(homeInnings+"  ") + homeR + scoreStyle.Render(homeHE)
+		homeLineStyled = homeAbbrStyled +
+			scoreStyle.Render(homeInnings+strings.Repeat(" ", layout.gap-1)) +
+			homeR + scoreStyle.Render(homeHE)
 	}
 
 	// Build the 3 lines, padding the left portion so the linescore
 	// aligns above the right (all plays) column.
 	countBasesGap := "               " // 15 spaces between count and bases
-	leftWidth := (m.width-3)/2 + 3     // match left column + divider from renderLiveGameStatus
+	leftWidth := liveLeftColumnWidth(m.width)
 	padStyle := lipgloss.NewStyle().Width(leftWidth)
 
 	line1Left := inningLine1 + "  " + ballsStr + countBasesGap + basesLine1
@@ -1307,7 +1405,7 @@ func (m Model) renderFinalGame(game *api.Game) string {
 	case ScoringPlaysSubview:
 		return header + "\n" + m.renderPlays(game, availableHeight, m.width, true, false)
 	default:
-		return header + "\n" + m.renderBoxScore(game)
+		return header + "\n" + m.renderBoxScore(game, availableHeight)
 	}
 }
 
@@ -1871,6 +1969,60 @@ func (m Model) renderPlays(game *api.Game, availableHeight int, colWidth int, sc
 }
 
 // renderScoreboard renders a sophisticated scoreboard panel with team colors
+// Final-game header card sizing. The values are lipgloss content widths
+// (padding included, border excluded), so a card occupies width+2
+// terminal columns and the three-across row occupies
+// 2*(team+2) + score+2.
+const (
+	scoreboardTeamCardWidth     = 30
+	scoreboardScoreCardWidth    = 20
+	scoreboardMinTeamCardWidth  = 17
+	scoreboardMinScoreCardWidth = 11
+)
+
+// scoreboardCardWidths sizes the three final-game header cards for the
+// terminal width. The FINAL badge gives up width first, then the team
+// cards; when even the minimums cannot sit three-across the caller
+// stacks them vertically instead of letting the borders hard-wrap (F4).
+func scoreboardCardWidths(termWidth int) (teamWidth, scoreWidth int, stacked bool) {
+	teamWidth = scoreboardTeamCardWidth
+	scoreWidth = scoreboardScoreCardWidth
+	if termWidth <= 0 {
+		return teamWidth, scoreWidth, false
+	}
+
+	// Three cards contribute 2 border columns each.
+	budget := termWidth - 6
+	if 2*teamWidth+scoreWidth <= budget {
+		return teamWidth, scoreWidth, false
+	}
+
+	scoreWidth = budget - 2*teamWidth
+	if scoreWidth < scoreboardMinScoreCardWidth {
+		scoreWidth = scoreboardMinScoreCardWidth
+		teamWidth = (budget - scoreWidth) / 2
+	}
+	if teamWidth < scoreboardMinTeamCardWidth {
+		// Stacked: each card gets the full width it can use.
+		teamWidth = scoreboardTeamCardWidth
+		scoreWidth = scoreboardScoreCardWidth
+		if termWidth-2 < teamWidth {
+			teamWidth = termWidth - 2
+		}
+		if termWidth-2 < scoreWidth {
+			scoreWidth = termWidth - 2
+		}
+		if teamWidth < 1 {
+			teamWidth = 1
+		}
+		if scoreWidth < 1 {
+			scoreWidth = 1
+		}
+		return teamWidth, scoreWidth, true
+	}
+	return teamWidth, scoreWidth, false
+}
+
 func (m Model) renderScoreboard(game *api.Game) string {
 	// Get scores from linescore if available
 	awayRuns := game.Teams.Away.Score
@@ -1922,32 +2074,30 @@ func (m Model) renderScoreboard(game *api.Game) string {
 		}
 	}
 
-	// Create team panels
-	awayPanel := lipgloss.NewStyle().
-		Width(30).
-		Padding(0, 2).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(awayColors.Primary).
-		Align(lipgloss.Center).
-		Render(lipgloss.JoinVertical(lipgloss.Center,
-			lipgloss.NewStyle().Foreground(awayColors.Primary).Bold(true).Render(awayName),
-			lipgloss.NewStyle().Foreground(awayColors.Secondary).Render(awayRecord),
-		))
+	// Card widths track the terminal so the box drawing never hard-wraps
+	// at narrow widths; below the three-across minimum the FINAL badge
+	// stacks between the team cards instead (F4).
+	teamWidth, scoreWidth, stacked := scoreboardCardWidths(m.width)
 
-	homePanel := lipgloss.NewStyle().
-		Width(30).
-		Padding(0, 2).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(homeColors.Primary).
-		Align(lipgloss.Center).
-		Render(lipgloss.JoinVertical(lipgloss.Center,
-			lipgloss.NewStyle().Foreground(homeColors.Primary).Bold(true).Render(homeName),
-			lipgloss.NewStyle().Foreground(homeColors.Secondary).Render(homeRecord),
-		))
+	teamPanel := func(name, record string, colors TeamColors) string {
+		return lipgloss.NewStyle().
+			Width(teamWidth).
+			Padding(0, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colors.Primary).
+			Align(lipgloss.Center).
+			Render(lipgloss.JoinVertical(lipgloss.Center,
+				lipgloss.NewStyle().Foreground(colors.Primary).Bold(true).Render(name),
+				lipgloss.NewStyle().Foreground(colors.Secondary).Render(record),
+			))
+	}
+
+	awayPanel := teamPanel(awayName, awayRecord, awayColors)
+	homePanel := teamPanel(homeName, homeRecord, homeColors)
 
 	// Create score panel in the center
 	scorePanel := lipgloss.NewStyle().
-		Width(20).
+		Width(scoreWidth).
 		Padding(0, 2).
 		Border(lipgloss.ThickBorder()).
 		BorderForeground(lipgloss.AdaptiveColor{Light: "#666666", Dark: "#AAAAAA"}).
@@ -1960,13 +2110,22 @@ func (m Model) renderScoreboard(game *api.Game) string {
 				Render(fmt.Sprintf("%d - %d", awayRuns, homeRuns)),
 		))
 
-	// Join panels horizontally
-	scoreboard := lipgloss.JoinHorizontal(
-		lipgloss.Center,
-		awayPanel,
-		scorePanel,
-		homePanel,
-	)
+	var scoreboard string
+	if stacked {
+		scoreboard = lipgloss.JoinVertical(
+			lipgloss.Center,
+			awayPanel,
+			scorePanel,
+			homePanel,
+		)
+	} else {
+		scoreboard = lipgloss.JoinHorizontal(
+			lipgloss.Center,
+			awayPanel,
+			scorePanel,
+			homePanel,
+		)
+	}
 
 	centered := lipgloss.NewStyle().
 		Width(m.width).
@@ -2081,31 +2240,21 @@ func getPlayerFromBoxscore(playerID int, boxscore api.Boxscore) *api.BoxscorePla
 }
 
 // getGameTeamColors extracts away and home team colors from a game.
-// buildScoreLineText builds the plain-text score line (no ANSI styling) for
-// one team. The result matches the width used by the score animation:
-// totalInnings*3 + 10 characters.
-func buildScoreLineText(ls api.Linescore, totalInnings int, homeAway string) string {
-	var innings string
-	for i := 0; i < totalInnings; i++ {
-		if i < len(ls.Innings) {
-			var score api.InningScore
-			if homeAway == "away" {
-				score = ls.Innings[i].Away
-			} else {
-				score = ls.Innings[i].Home
-			}
-			innings += fmt.Sprintf(" %2d", score.RunsVal())
-		} else {
-			innings += "   "
-		}
-	}
+// buildScoreLineText builds the plain-text score line (no ANSI styling)
+// for one team, in the same layout renderCompactGameSituation uses, so
+// the animation never renders wider than the static row.
+// Width: layout.width(totalInnings) minus the 3-char abbreviation.
+func buildScoreLineText(ls api.Linescore, totalInnings int, homeAway string, layout linescoreLayout) string {
+	innings := linescoreInnings(ls, totalInnings, homeAway, layout)
+
 	var team api.LinescoreTeam
 	if homeAway == "away" {
 		team = ls.Teams.Away
 	} else {
 		team = ls.Teams.Home
 	}
-	return innings + fmt.Sprintf("  %2d %2d %2d", team.Runs, team.Hits, team.Errors)
+	return innings + strings.Repeat(" ", layout.gap-1) +
+		fmt.Sprintf("%2d %2d %2d", team.Runs, team.Hits, team.Errors)
 }
 
 func getGameTeamColors(game *api.Game) (away, home lipgloss.Color) {

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image/color"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -69,6 +70,14 @@ func (m Model) renderPregameTabBody(game *api.Game, width int) string {
 // the same team-colored indicators as the plays viewport. offset is
 // clamped to the content bounds.
 func renderTabBodyViewport(game *api.Game, body string, width, height, offset int) string {
+	away, home := getGameTeamColors(game)
+	return renderScrollViewport(body, width, height, offset, away, home)
+}
+
+// renderScrollViewport is the shared scrolling viewport: it pads short
+// content so whatever sits below stays pinned, and clamps and scrolls
+// overflowing content with gradient indicators in the given colors.
+func renderScrollViewport(body string, width, height, offset int, from, to color.Color) string {
 	if height <= 0 {
 		return ""
 	}
@@ -100,16 +109,15 @@ func renderTabBodyViewport(game *api.Game, body string, width, height, offset in
 		viewEnd = len(lines)
 	}
 
-	away, home := getGameTeamColors(game)
 	var b strings.Builder
 	if offset > 0 {
-		b.WriteString(anim.ScrollIndicator(anim.ScrollUp, offset, width, away, home))
+		b.WriteString(anim.ScrollIndicator(anim.ScrollUp, offset, width, from, to))
 		b.WriteString("\n")
 	}
 	b.WriteString(strings.Join(lines[offset:viewEnd], "\n"))
 	if viewEnd < len(lines) {
 		b.WriteString("\n")
-		b.WriteString(anim.ScrollIndicator(anim.ScrollDown, len(lines)-viewEnd, width, away, home))
+		b.WriteString(anim.ScrollIndicator(anim.ScrollDown, len(lines)-viewEnd, width, from, to))
 	}
 	return padToHeight(b.String(), height)
 }

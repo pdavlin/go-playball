@@ -17,25 +17,78 @@ var divisionSortOrder = map[string]int{
 	"West":    2,
 }
 
-// handleStandingsKeys handles keyboard input for standings view
-// TODO: Add scroll offset tracking and scroll indicators when standings gets scroll support.
+// maxStandingsCardWidth caps a division card in the single-column
+// (narrow) layout. Full-width cards leave a wide gap between team names
+// and their stats, which makes the table hard to scan (F9).
+const maxStandingsCardWidth = 60
+
+// handleStandingsKeys handles keyboard input for standings view. The
+// content is taller than most terminals, so it scrolls (F9).
 func (m Model) handleStandingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxOffset := m.standingsMaxScroll()
+	switch msg.String() {
+	case "j", "down":
+		if m.standingsScrollOffset < maxOffset {
+			m.standingsScrollOffset++
+		}
+	case "k", "up":
+		if m.standingsScrollOffset > 0 {
+			m.standingsScrollOffset--
+		}
+	case "g", "home":
+		m.standingsScrollOffset = 0
+	case "G", "end":
+		m.standingsScrollOffset = maxOffset
+	}
 	return m, nil
 }
 
-// renderStandings renders the standings view
-func (m Model) renderStandings() string {
-	var b strings.Builder
+// standingsMaxScroll returns the largest useful scroll offset for the
+// current content and terminal height.
+func (m Model) standingsMaxScroll() int {
+	height := m.standingsViewportHeight()
+	// The viewport spends a line on each visible scroll indicator.
+	max := lipgloss.Height(m.renderStandingsBody()) - (height - 2)
+	if max < 0 {
+		return 0
+	}
+	return max
+}
 
+// standingsViewportHeight is the screen height available to the
+// standings body (everything but the help bar).
+func (m Model) standingsViewportHeight() int {
+	height := m.height - 1
+	if height < 1 {
+		height = 1
+	}
+	return height
+}
+
+// renderStandings fits the standings body into the terminal height so
+// the title stays anchored at the top and the overflow scrolls with
+// j/k instead of running off the bottom of the screen.
+func (m Model) renderStandings() string {
 	if m.err != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
-		return b.String()
+		return errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
 	}
 
 	if len(m.standings) == 0 && len(m.wbcStandings) == 0 {
-		b.WriteString(itemStyle.Render("Loading standings..."))
-		return b.String()
+		return itemStyle.Render("Loading standings...")
 	}
+
+	return renderScrollViewport(
+		m.renderStandingsBody(),
+		m.width,
+		m.standingsViewportHeight(),
+		m.standingsScrollOffset,
+		colorPrimary, colorAccent,
+	)
+}
+
+// renderStandingsBody renders the standings at their natural height.
+func (m Model) renderStandingsBody() string {
+	var b strings.Builder
 
 	// Render WBC pool standings if present
 	if len(m.wbcStandings) > 0 {
@@ -64,7 +117,7 @@ func (m Model) renderStandings() string {
 				b.WriteString("\n")
 			}
 		} else {
-			panelWidth := m.width
+			panelWidth := standingsCardWidth(m.width)
 			for _, pool := range m.wbcStandings {
 				b.WriteString(m.renderWBCPoolPanel(pool, panelWidth))
 				b.WriteString("\n")
@@ -116,7 +169,7 @@ func (m Model) renderStandings() string {
 		}
 		b.WriteString(lipgloss.JoinVertical(lipgloss.Left, gridRows...))
 	} else {
-		panelWidth := m.width
+		panelWidth := standingsCardWidth(m.width)
 		for i := 0; i < 3; i++ {
 			if i < len(alDivisions) {
 				b.WriteString(m.renderDivisionPanel(alDivisions[i], panelWidth))
@@ -130,6 +183,15 @@ func (m Model) renderStandings() string {
 	}
 
 	return b.String()
+}
+
+// standingsCardWidth returns the single-column card width for a
+// terminal width, capped so the table stays scannable.
+func standingsCardWidth(termWidth int) int {
+	if termWidth > maxStandingsCardWidth {
+		return maxStandingsCardWidth
+	}
+	return termWidth
 }
 
 // renderDivisionPanel renders a single division as a bordered panel with a table
