@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/pdavlin/go-playball/internal/api"
 	"github.com/pdavlin/go-playball/internal/ui/anim"
 )
@@ -90,6 +91,20 @@ func isPreviewGame(game *api.Game) bool {
 		state = game.GameData.Status.AbstractGameState
 	}
 	return state == "Preview"
+}
+
+// isFinalGame reports whether the given game has finished. Used by the
+// help bar to avoid advertising the live tab strip (1-3/hl), which
+// renderFinalGame never looks at.
+func isFinalGame(game *api.Game) bool {
+	if game == nil {
+		return false
+	}
+	state := game.Status.AbstractGameState
+	if state == "" && game.GameData != nil {
+		state = game.GameData.Status.AbstractGameState
+	}
+	return state == "Final"
 }
 
 // handlePregameKeys handles navigation for a Preview game. The model is
@@ -502,17 +517,30 @@ func (m Model) renderPregameOverview(game *api.Game, width, height int) string {
 		}
 	}
 
+	// Create three columns
+	colWidth := (width - 4) / 3
+	if colWidth < 20 {
+		colWidth = 20
+	}
+
 	// Format center column with game info
-	// Use GameData.Datetime.DateTime for accurate start time
+	// Use GameData.Datetime.DateTime for accurate start time. Below a width
+	// threshold the long form ("January 2, 2026 9:10 PM CDT") no longer
+	// fits the center column, wrapping the timezone onto its own line; drop
+	// the year in that case to keep the whole line intact.
+	dateFormat := "January 2, 2006 3:04 PM MST"
+	if colWidth < 30 {
+		dateFormat = "Jan 2, 3:04 PM MST"
+	}
 	startTime := ""
 	if !game.GameData.Datetime.DateTime.IsZero() {
 		if game.GameData.Status.StartTimeTBD {
 			startTime = "Start time TBD"
 		} else {
-			startTime = game.GameData.Datetime.DateTime.Local().Format("January 2, 2006 3:04 PM MST")
+			startTime = game.GameData.Datetime.DateTime.Local().Format(dateFormat)
 		}
 	} else if !game.GameDate.IsZero() {
-		startTime = game.GameDate.Local().Format("January 2, 2006 3:04 PM MST")
+		startTime = game.GameDate.Local().Format(dateFormat)
 	}
 
 	centerLines := []string{
@@ -526,12 +554,6 @@ func (m Model) renderPregameOverview(game *api.Game, width, height int) string {
 	if game.GameData.Venue.Location.City != "" {
 		location := fmt.Sprintf("%s, %s", game.GameData.Venue.Location.City, game.GameData.Venue.Location.StateAbbrev)
 		centerLines = append(centerLines, location)
-	}
-
-	// Create three columns
-	colWidth := (width - 4) / 3
-	if colWidth < 20 {
-		colWidth = 20
 	}
 
 	awayCol := lipgloss.NewStyle().
@@ -622,7 +644,7 @@ func (m Model) renderLiveGameStatus(game *api.Game) string {
 	leftWidth := (m.width - 3) / 2
 	rightWidth := m.width - leftWidth - 3
 
-	leftCol := m.renderMatchupAndAtBat(game)
+	leftCol := m.renderMatchupAndAtBat(game, leftWidth)
 	rightCol := m.renderLiveRightColumn(game, availableHeight, rightWidth)
 
 	leftStyled := lipgloss.NewStyle().
@@ -825,8 +847,10 @@ func (m Model) renderCompactGameSituation(game *api.Game) string {
 	return line1 + "\n" + line2 + "\n" + line3
 }
 
-// renderMatchupAndAtBat renders the matchup and current at-bat (left column)
-func (m Model) renderMatchupAndAtBat(game *api.Game) string {
+// renderMatchupAndAtBat renders the matchup and current at-bat (left column).
+// width is the left column's rendered width; the Pitching/At Bat lines are
+// wrapped to it so they never spill past the divider.
+func (m Model) renderMatchupAndAtBat(game *api.Game, width int) string {
 	if game.LiveData.Plays.CurrentPlay == nil {
 		return ""
 	}
@@ -874,7 +898,7 @@ func (m Model) renderMatchupAndAtBat(game *api.Game) string {
 				pitcher.Stats.Pitching.PitchesThrown,
 				pitcher.SeasonStats.Pitching.Era)
 		}
-		b.WriteString(pitchingLine)
+		b.WriteString(wrapWithHangingIndent(pitchingLine, width, 2))
 		b.WriteString("\n")
 	}
 
@@ -888,7 +912,7 @@ func (m Model) renderMatchupAndAtBat(game *api.Game) string {
 				batter.SeasonStats.Batting.Avg,
 				batter.SeasonStats.Batting.HomeRuns)
 		}
-		b.WriteString(battingLine)
+		b.WriteString(wrapWithHangingIndent(battingLine, width, 2))
 		b.WriteString("\n")
 	}
 
@@ -941,6 +965,33 @@ func (m Model) renderMatchupAndAtBat(game *api.Game) string {
 	}
 
 	return b.String()
+}
+
+// wrapWithHangingIndent ansi-aware word-wraps s to width, then indents any
+// wrapped continuation lines so they read as part of the same statement
+// instead of an orphaned fragment flush against the left edge. No stats are
+// dropped; long lines simply take more rows within the column.
+func wrapWithHangingIndent(s string, width, indent int) string {
+	if width <= 0 {
+		return s
+	}
+	wrapped := ansi.Wordwrap(s, width, "")
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) <= 1 {
+		return wrapped
+	}
+
+	contentWidth := width - indent
+	if contentWidth < 1 {
+		contentWidth = width
+	}
+	rest := ansi.Wordwrap(strings.Join(lines[1:], " "), contentWidth, "")
+	pad := strings.Repeat(" ", indent)
+	restLines := strings.Split(rest, "\n")
+	for i := range restLines {
+		restLines[i] = pad + restLines[i]
+	}
+	return lines[0] + "\n" + strings.Join(restLines, "\n")
 }
 
 // Strike zone grid constants
