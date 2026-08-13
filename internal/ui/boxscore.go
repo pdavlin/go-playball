@@ -29,7 +29,9 @@ const minSideBySideWidth = 120
 // renderBoxScore composes the four box score panels in a 2x2 grid
 // (away left, home right, batting top, pitching bottom) when the terminal
 // is wide enough, falling back to vertical stacking when narrow.
-func (m Model) renderBoxScore(game *api.Game) string {
+// availableHeight is the number of screen lines the caller has left for
+// the panels.
+func (m Model) renderBoxScore(game *api.Game, availableHeight int) string {
 	if game.LiveData == nil {
 		return lipgloss.NewStyle().
 			Width(m.width).
@@ -62,9 +64,6 @@ func (m Model) renderBoxScore(game *api.Game) string {
 	awayPitchRows := buildPitcherRows(boxscore.Teams.Away, players)
 	homePitchRows := buildPitcherRows(boxscore.Teams.Home, players)
 
-	// Header overhead: scoreboard(4) + linescore(5) + decisions(3) + helpbar(1) = 13
-	headerHeight := 13
-	availableHeight := m.height - headerHeight
 	if availableHeight < 12 {
 		availableHeight = 12
 	}
@@ -132,28 +131,110 @@ func (m Model) renderBoxScore2x2(
 	return lipgloss.JoinVertical(lipgloss.Left, topRow, bottomRow)
 }
 
-// renderBoxScoreStacked renders all four panels in a single vertical stack
-// for narrow terminals.
+// collapsedPanelHeight is the content height of an unfocused panel in
+// the stacked layout: its title, one table row and the overflow
+// indicator.
+const collapsedPanelHeight = 3
+
+// renderBoxScoreStacked renders all four panels in a single vertical
+// stack for narrow terminals, as an accordion: the panel selected with
+// 1-4 takes the height its table needs (up to what is left), the other
+// three collapse to their title, one row and an overflow indicator (F10).
 func (m Model) renderBoxScoreStacked(
 	awayAbbr, homeAbbr string,
 	awayBat, homeBat, awayPitch, homePitch string,
 	awayColors, homeColors TeamColors,
 	availableHeight int, panelWidth int,
 ) string {
-	// Each panel adds 2 border lines. Four panels = 8 border lines.
-	panelHeight := (availableHeight - 8) / 4
-	if panelHeight < 3 {
-		panelHeight = 3
+	contents := []string{awayBat, homeBat, awayPitch, homePitch}
+	titles := []string{
+		awayAbbr + " Batting", homeAbbr + " Batting",
+		awayAbbr + " Pitching", homeAbbr + " Pitching",
 	}
+	colors := []TeamColors{awayColors, homeColors, awayColors, homeColors}
 
-	panels := []string{
-		m.renderPanel(awayAbbr+" Batting", awayBat, 0, panelHeight, panelWidth, awayColors),
-		m.renderPanel(homeAbbr+" Batting", homeBat, 1, panelHeight, panelWidth, homeColors),
-		m.renderPanel(awayAbbr+" Pitching", awayPitch, 2, panelHeight, panelWidth, awayColors),
-		m.renderPanel(homeAbbr+" Pitching", homePitch, 3, panelHeight, panelWidth, homeColors),
+	var contentLines [4]int
+	for i, content := range contents {
+		contentLines[i] = lipgloss.Height(content)
+	}
+	heights := stackedPanelHeights(availableHeight, contentLines, m.focusedPanel)
+
+	panels := make([]string, len(contents))
+	for i, content := range contents {
+		panels[i] = m.renderPanel(titles[i], content, i, heights[i], panelWidth, colors[i])
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, panels...)
+}
+
+// stackedPanelHeights budgets content heights for the four stacked
+// panels. Each panel also draws 2 border lines, so the stack occupies
+// sum(heights) + 8 screen lines. The focused panel absorbs everything
+// the collapsed panels do not need, capped at the height its own table
+// wants; slack from a short focused table goes back to the collapsed
+// panels. When there is not enough room for an accordion the four
+// panels split the budget evenly, as before.
+func stackedPanelHeights(availableHeight int, contentLines [4]int, focused int) [4]int {
+	var heights [4]int
+	if focused < 0 || focused >= len(heights) {
+		focused = 0
+	}
+
+	budget := availableHeight - 8 // border lines
+
+	// The focused panel needs its title plus a couple more rows than a
+	// collapsed one, or the accordion buys nothing over an even split.
+	focusedHeight := budget - 3*collapsedPanelHeight
+	if focusedHeight < collapsedPanelHeight+2 {
+		even := budget / 4
+		if even < 3 {
+			even = 3
+		}
+		for i := range heights {
+			heights[i] = even
+		}
+		return heights
+	}
+
+	// A panel never needs to be taller than its title plus its rows.
+	var want [4]int
+	for i, n := range contentLines {
+		want[i] = n + 1
+	}
+	if want[focused] < focusedHeight {
+		focusedHeight = want[focused]
+	}
+
+	used := focusedHeight
+	for i := range heights {
+		heights[i] = collapsedPanelHeight
+		if i != focused {
+			used += collapsedPanelHeight
+		}
+	}
+	heights[focused] = focusedHeight
+
+	// Hand slack from a short focused table back to the other panels so
+	// the stack fills the screen instead of trailing off into blanks.
+	for slack := budget - used; slack > 0; {
+		grew := false
+		for i := range heights {
+			if slack == 0 {
+				break
+			}
+			if i == focused || heights[i] >= want[i] {
+				continue
+			}
+			heights[i]++
+			slack--
+			grew = true
+		}
+		if !grew {
+			break
+		}
+	}
+
+	return heights
 }
 
 // renderPanel wraps content in a bordered panel with scroll support.
@@ -172,7 +253,9 @@ func (m Model) renderPanel(title string, content string, panelIdx int, height in
 		offset = 0
 	}
 
-	// Determine which indicators are needed and adjust height
+	// Determine which indicators are needed and adjust height. The
+	// indicators must fit inside the panel, so a collapsed panel can end
+	// up showing no rows at all rather than overflowing its box.
 	hasUp := offset > 0
 	hasDown := len(lines) > offset+innerHeight
 	adjustedHeight := innerHeight
@@ -182,8 +265,8 @@ func (m Model) renderPanel(title string, content string, panelIdx int, height in
 	if hasDown {
 		adjustedHeight--
 	}
-	if adjustedHeight < 1 {
-		adjustedHeight = 1
+	if adjustedHeight < 0 {
+		adjustedHeight = 0
 	}
 
 	// Clamp scroll offset with adjusted height
@@ -208,27 +291,22 @@ func (m Model) renderPanel(title string, content string, panelIdx int, height in
 	// Text area width for centering indicators
 	textWidth := panelWidth - 4
 
-	// Build content with title
-	var b strings.Builder
+	// Build the body as an explicit line list: title, optional
+	// indicators and the visible rows never exceed height lines.
+	// Only the focused panel's title is bold (gradient) — the weight
+	// difference is the non-color selection cue.
+	titleLine := title
 	if panelIdx == m.focusedPanel {
-		b.WriteString(anim.BlendGradientBold(title, teamColors.Primary, teamColors.Secondary))
-	} else {
-		titleStyle := lipgloss.NewStyle()
-		b.WriteString(titleStyle.Render(title))
+		titleLine = anim.BlendGradientBold(title, teamColors.Primary, teamColors.Secondary)
 	}
-	b.WriteString("\n")
 
+	body := []string{titleLine}
 	if hasUp {
-		b.WriteString(anim.ScrollIndicator(anim.ScrollUp, offset, textWidth, teamColors.Primary, teamColors.Secondary))
-		b.WriteString("\n")
+		body = append(body, anim.ScrollIndicator(anim.ScrollUp, offset, textWidth, teamColors.Primary, teamColors.Secondary))
 	}
-
-	b.WriteString(strings.Join(visible, "\n"))
-
+	body = append(body, visible...)
 	if hasDown {
-		remaining := len(lines) - end
-		b.WriteString("\n")
-		b.WriteString(anim.ScrollIndicator(anim.ScrollDown, remaining, textWidth, teamColors.Primary, teamColors.Secondary))
+		body = append(body, anim.ScrollIndicator(anim.ScrollDown, len(lines)-end, textWidth, teamColors.Primary, teamColors.Secondary))
 	}
 
 	// lipgloss Width/Height = content area (includes padding, excludes border).
@@ -251,7 +329,7 @@ func (m Model) renderPanel(title string, content string, panelIdx int, height in
 		borderStyle = borderStyle.BorderForeground(lipgloss.AdaptiveColor{Light: "#AAAAAA", Dark: "#666666"})
 	}
 
-	return borderStyle.Render(b.String())
+	return borderStyle.Render(strings.Join(body, "\n"))
 }
 
 // buildBatterRows builds table rows for a team's batting stats.

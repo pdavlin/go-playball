@@ -75,8 +75,9 @@ type Model struct {
 	scheduleScrollOffset int
 
 	// Standings view state
-	standings    []api.DivisionStandings
-	wbcStandings []api.WBCPool
+	standings             []api.DivisionStandings
+	wbcStandings          []api.WBCPool
+	standingsScrollOffset int
 
 	// Game view state
 	currentGame        *api.Game
@@ -264,6 +265,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scoreAnim = nil
 				m.winProb = nil
 				m.wbcStandings = nil
+				m.standingsScrollOffset = 0
 				m.loading = true
 				spinnerCmd := m.startSpinner("Loading", colorPrimary, colorAccent)
 				cmds := []tea.Cmd{spinnerCmd, loadStandings(m.apiClient)}
@@ -401,14 +403,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if newAway != m.prevAwayScore || newHome != m.prevHomeScore {
 					awayC, homeC := getGameTeamColorsFull(msg.game)
 					ls := msg.game.LiveData.Linescore
-					totalInnings := ls.CurrentInning
-					if totalInnings < 9 {
-						totalInnings = 9
-					}
-					// Width: innings (3 chars each) + gap (2) + R (2) + H E (6)
-					lineWidth := totalInnings*3 + 10
-					awayText := buildScoreLineText(ls, totalInnings, "away")
-					homeText := buildScoreLineText(ls, totalInnings, "home")
+					totalInnings := liveTotalInnings(ls)
+					// Match the width the static row would use at this
+					// terminal width, minus the 3-char abbreviation.
+					layout := liveLinescoreLayout(totalInnings, m.width)
+					lineWidth := layout.width(totalInnings) - 3
+					awayText := buildScoreLineText(ls, totalInnings, "away", layout)
+					homeText := buildScoreLineText(ls, totalInnings, "home", layout)
 					sa := anim.NewScoreAnim(
 						newAway != m.prevAwayScore,
 						newHome != m.prevHomeScore,
@@ -703,7 +704,7 @@ func (m Model) helpItems() []helpItem {
 		return items
 
 	case StandingsView:
-		return []helpItem{schedule, standings, quit}
+		return []helpItem{schedule, standings, {"jk: scroll", helpPriorityNav}, quit}
 
 	case GameView:
 		base := []helpItem{schedule, standings, quit}
@@ -766,9 +767,9 @@ func (m Model) gameSubviewHelpItems() []helpItem {
 		}
 		if isFinalGame(m.currentGame) {
 			// GameStatusSubview on a final game renders the same box
-			// score as BoxScoreSubview (renderFinalGame's default
-			// case), just without panel selection wired up.
-			return []helpItem{g, b, a, p, scroll}
+			// score as BoxScoreSubview, and handleGameKeys routes 1-4
+			// and j/k to the panels there, so advertise them.
+			return []helpItem{g, b, a, p, {"1-4: panels", helpPriorityConvenience}, scroll}
 		}
 		return []helpItem{{"1-3/hl: tabs", helpPriorityCore}, scroll, b, a, p}
 	}
