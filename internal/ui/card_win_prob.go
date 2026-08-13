@@ -160,7 +160,7 @@ func renderWinProbSwings(swings []winProbSwing, awayAbbr, homeAbbr string,
 		Foreground(lipgloss.AdaptiveColor{Light: "#444444", Dark: "#CCCCCC"})
 
 	var lines []string
-	lines = append(lines, sectionStyle.Render("Big plays"))
+	lines = append(lines, sectionStyle.Render("Big plays (Δ win prob)"))
 
 	// Walk newest to oldest.
 	for i := len(swings) - 1; i >= 0; i-- {
@@ -175,7 +175,7 @@ func renderWinProbSwings(swings []winProbSwing, awayAbbr, homeAbbr string,
 
 		top := fmt.Sprintf("%s %s  %s",
 			teamStyle.Render(abbr),
-			lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("+%.0f", math.Abs(sw.delta))),
+			lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("+%.0f%%", math.Abs(sw.delta))),
 			dimStyle.Render(formatHalfInning(sw.halfInning, sw.inning)),
 		)
 

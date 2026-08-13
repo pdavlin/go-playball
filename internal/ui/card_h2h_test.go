@@ -150,6 +150,37 @@ func TestRenderH2HCardErrorFallback(t *testing.T) {
 	}
 }
 
+func TestRenderH2HBipolarBarOneSided(t *testing.T) {
+	// KC 0 - 2 LAD: away shut out. The bar must still visibly read as
+	// a ratio (split marker + dim sliver), not a solid unlabeled block.
+	p := &h2hPayload{games: 2, awayWins: 0, homeWins: 2}
+	out := renderH2HBipolarBar(p, TeamColors{}, TeamColors{}, 40)
+
+	if !strings.Contains(out, "│") {
+		t.Fatalf("expected a split marker in a one-sided bar, got: %q", out)
+	}
+	markerIdx := strings.Index(out, "│")
+	awaySide := out[:markerIdx]
+	homeSide := out[markerIdx+len("│"):]
+
+	awayBlocks := strings.Count(awaySide, "█")
+	homeBlocks := strings.Count(homeSide, "█")
+	if awayBlocks == 0 {
+		t.Error("shut-out side should still render a dim sliver, got none")
+	}
+	if awayBlocks >= homeBlocks {
+		t.Errorf("shut-out side (%d) should be far smaller than the winning side (%d)", awayBlocks, homeBlocks)
+	}
+}
+
+func TestRenderH2HBipolarBarBalanced(t *testing.T) {
+	p := &h2hPayload{games: 4, awayWins: 2, homeWins: 2}
+	out := renderH2HBipolarBar(p, TeamColors{}, TeamColors{}, 40)
+	if strings.Count(out, "│") != 1 {
+		t.Errorf("expected exactly one split marker, got %d in %q", strings.Count(out, "│"), out)
+	}
+}
+
 func TestRenderH2HBodyShowsAggregates(t *testing.T) {
 	p := &h2hPayload{
 		loaded: true, games: 5,

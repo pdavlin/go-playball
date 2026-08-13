@@ -210,7 +210,7 @@ func (m Model) renderPanel(title string, content string, panelIdx int, height in
 	if panelIdx == m.focusedPanel {
 		b.WriteString(anim.BlendGradientBold(title, teamColors.Primary, teamColors.Secondary))
 	} else {
-		titleStyle := lipgloss.NewStyle().Bold(true)
+		titleStyle := lipgloss.NewStyle()
 		b.WriteString(titleStyle.Render(title))
 	}
 	b.WriteString("\n")
@@ -245,7 +245,7 @@ func (m Model) renderPanel(title string, content string, panelIdx int, height in
 		midColor := anim.GradientRamp(teamColors.Primary, teamColors.Secondary, 3)[1]
 		borderStyle = borderStyle.BorderForeground(lipgloss.Color(anim.ColorToHex(midColor)))
 	} else {
-		borderStyle = borderStyle.BorderForeground(lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#444444"})
+		borderStyle = borderStyle.BorderForeground(lipgloss.AdaptiveColor{Light: "#AAAAAA", Dark: "#666666"})
 	}
 
 	return borderStyle.Render(b.String())
