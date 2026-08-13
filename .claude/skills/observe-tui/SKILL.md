@@ -87,6 +87,12 @@ Then send `out.html` with SendUserFile (`display: render`).
 
 ## Gotchas
 
+- **Never run `tmux kill-server`.** It kills every session on the
+  default socket — including the user's own tmux, if they have one
+  running outside this rig — not just the observation session. This
+  has happened: an agent used it as cleanup and took down an
+  unrelated live session. Only ever kill the named session:
+  `tmux kill-session -t "$SESSION"`.
 - Always `tmux kill-session` when done (use a trap); orphaned sessions
   keep polling the MLB API.
 - Frame captures are byte strings but terminal layout is columns:
